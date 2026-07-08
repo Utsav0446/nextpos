@@ -19,6 +19,18 @@
       }
     ],
     "paths": {
+      "@/components/*": ["./frontend/components/*"],
+      "@/context/*": ["./frontend/context/*"],
+      "@/hooks/*": ["./frontend/hooks/*"],
+      "@/utils/*": ["./frontend/utils/*"],
+      "@/db/*": ["./backend/db/*"],
+      "@/db": ["./backend/db/index.ts"],
+      "@/queries/*": ["./backend/queries/*"],
+      "@/actions/*": ["./backend/actions/*"],
+      "@/schemas/*": ["./backend/schemas/*"],
+      "@/types/*": ["./backend/types/*"],
+      "@/types": ["./backend/types/index.ts"],
+      "@/lib/*": ["./backend/lib/*"],
       "@/*": ["./*"]
     }
   },

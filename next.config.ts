@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* trigger dev server configuration reload to apply printer and logo migrations */
 };
 
 export default nextConfig;

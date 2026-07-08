@@ -1,0 +1,29 @@
+         New Only Dhosa
+      Taste of Tradition!
+ 123 Food Street, Culinary City
+      Tel: +91 98765 43210
+     GSTIN: 22AAAAA0000A1Z5
+================================
+          TOKEN NO: 1
+================================
+Bill No: #77       Type: Dine-In
+Date: 7/8/2026        Table: T-2
+Customer: Walk-in
+--------------------------------
+Item                   Qty   Amt
+--------------------------------
+બાહુબલી ઢોસા         1    180.00
+ચીઝ ફેકી ઢોસા        1    180.00
+બટર ચીઝ સેઝવાન મેગી  1    120.00
+ચીઝ ઢોસા ફાઈ (Medium 1    210.00
+બોમ્બે ભેળ (Medium S 1    130.00
+બેબી પેપર (Medium Spi 1    50.00
+--------------------------------
+Subtotal:                 870.00
+================================
+GRAND TOTAL:              870.00
+================================
+         Paid via Cash
+
+    Thank you! Visit again!
+     System generated copy

@@ -28,8 +28,10 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
 
   const { summary, dailyBreakdown } = reportData;
 
-  const csvRows = dailyBreakdown.map((row) => ({
+  const csvRows = dailyBreakdown.map((row: any) => ({
     Date: row.date,
+    'Parcel Sales (Takeaway)': Number(row.parcel_sales || 0),
+    'Sitting Sales (Dine-In)': Number(row.sitting_sales || 0),
     Revenue: Number(row.sales),
     Expenses: Number(row.expenses),
     'Net Profit': Number(row.profit),
@@ -160,47 +162,57 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         <div className="px-6 py-4.5 border-b border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/50 dark:bg-zinc-900/20">
           <h3 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-widest">Period Interval Breakdown</h3>
         </div>
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-100 dark:border-zinc-800 text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
-              <th className="px-6 py-4">Date</th>
-              <th className="px-6 py-4">Settled Orders</th>
-              <th className="px-6 py-4">Gross Revenue</th>
-              <th className="px-6 py-4">Costs / Outflows</th>
-              <th className="px-6 py-4 text-right">Net Profit / Loss</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
-            {dailyBreakdown.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="text-center py-16 text-zinc-400">
-                  <HelpCircle className="w-8 h-8 mx-auto mb-2 text-zinc-300" />
-                  No accounting logs found for this period.
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs min-w-[700px]">
+            <thead>
+              <tr className="bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-100 dark:border-zinc-800 text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                <th className="px-6 py-4">Date</th>
+                <th className="px-6 py-4">Settled Orders</th>
+                <th className="px-6 py-4">Parcel Sales</th>
+                <th className="px-6 py-4">Sitting Sales</th>
+                <th className="px-6 py-4">Gross Revenue</th>
+                <th className="px-6 py-4">Costs / Outflows</th>
+                <th className="px-6 py-4 text-right">Net Profit / Loss</th>
               </tr>
-            ) : (
-              dailyBreakdown.map((row, idx) => (
-                <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20 transition-colors">
-                  <td className="px-6 py-4.5 font-bold text-zinc-850 dark:text-zinc-200">
-                    {formatDateOnly(row.date)}
-                  </td>
-                  <td className="px-6 py-4.5 text-zinc-400">
-                    {row.orders} orders
-                  </td>
-                  <td className="px-6 py-4.5 text-zinc-900 dark:text-zinc-100 font-semibold">
-                    {formatCurrency(row.sales, settings.currency)}
-                  </td>
-                  <td className="px-6 py-4.5 text-red-500 font-semibold">
-                    -{formatCurrency(row.expenses, settings.currency)}
-                  </td>
-                  <td className={`px-6 py-4.5 text-right font-extrabold ${row.profit >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {formatCurrency(row.profit, settings.currency)}
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-medium">
+              {dailyBreakdown.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-16 text-zinc-400">
+                    <HelpCircle className="w-8 h-8 mx-auto mb-2 text-zinc-300" />
+                    No accounting logs found for this period.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                dailyBreakdown.map((row: any, idx) => (
+                  <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20 transition-colors">
+                    <td className="px-6 py-4.5 font-bold text-zinc-850 dark:text-zinc-200">
+                      {formatDateOnly(row.date)}
+                    </td>
+                    <td className="px-6 py-4.5 text-zinc-400">
+                      {row.orders} orders
+                    </td>
+                    <td className="px-6 py-4.5 text-emerald-600 dark:text-emerald-400 font-semibold">
+                      {formatCurrency(row.parcel_sales || 0, settings.currency)}
+                    </td>
+                    <td className="px-6 py-4.5 text-blue-600 dark:text-blue-400 font-semibold">
+                      {formatCurrency(row.sitting_sales || 0, settings.currency)}
+                    </td>
+                    <td className="px-6 py-4.5 text-zinc-900 dark:text-zinc-100 font-semibold">
+                      {formatCurrency(row.sales, settings.currency)}
+                    </td>
+                    <td className="px-6 py-4.5 text-red-500 font-semibold">
+                      -{formatCurrency(row.expenses, settings.currency)}
+                    </td>
+                    <td className={`px-6 py-4.5 text-right font-extrabold ${row.profit >= 0 ? 'text-emerald-650' : 'text-red-550'}`}>
+                      {formatCurrency(row.profit, settings.currency)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

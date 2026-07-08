@@ -1,22 +1,21 @@
 import React from 'react';
 import { getDashboardStats, getDashboardComparisonStats } from '@/queries/dashboard';
 import { getSettings } from '@/queries/settings';
-import { getLowStockItems } from '@/queries/inventory';
+import { getRecentOrdersWithItems } from '@/queries/orders';
 import { getAuditLogs } from '@/queries/logs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import SalesChart from '@/components/dashboard/SalesChart';
 import { formatCurrency, formatDate } from '@/utils/format';
-import Link from 'next/link';
+import { LanguageSelector } from '@/components/dashboard/LanguageSelector';
+import { DashboardRecentOrders } from '@/components/dashboard/DashboardRecentOrders';
+
 import { 
   TrendingUp, 
   ShoppingBag, 
   DollarSign, 
-  AlertTriangle, 
   Activity, 
   Calendar,
   Layers,
   Sparkles,
-  ArrowUpRight,
   TrendingDown
 } from 'lucide-react';
 
@@ -26,12 +25,9 @@ export default async function DashboardPage() {
   const stats = await getDashboardStats();
   const comparisons = await getDashboardComparisonStats();
   const settings = await getSettings();
-  const lowStock = await getLowStockItems();
   const auditLogs = await getAuditLogs(5);
+  const recentOrders = await getRecentOrdersWithItems(7);
 
-  const currencySymbol = settings.currency === 'USD' ? '$' : 
-                         settings.currency === 'EUR' ? '€' : 
-                         settings.currency === 'GBP' ? '£' : '₹';
 
   // Calculate day-over-day growth percentage
   const yesterdaySales = stats.yesterdaySales || 1; // avoid divide-by-zero
@@ -49,9 +45,12 @@ export default async function DashboardPage() {
             Real-time analytics for {settings.restaurant_name}.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-semibold bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 rounded-xl text-zinc-500">
-          <Calendar className="w-3.5 h-3.5 mr-1" />
-          {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          <LanguageSelector />
+          <div className="flex items-center justify-center gap-2 text-xs font-semibold bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-2 rounded-xl text-zinc-500">
+            <Calendar className="w-3.5 h-3.5 mr-1 animate-none" />
+            {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+          </div>
         </div>
       </div>
 
@@ -147,62 +146,8 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Main Graph Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Sales Chart (2 columns) */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-sm font-bold uppercase tracking-wider text-zinc-500">Weekly Revenue Flow</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <SalesChart data={stats.salesGraphData} currencySymbol={currencySymbol} />
-          </CardContent>
-        </Card>
-
-        {/* Low Stock Panel (1 column) */}
-        <Card className="flex flex-col h-[395px]">
-          <CardHeader className="flex justify-between items-center pb-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-zinc-500">Low Stock Alerts</CardTitle>
-            </div>
-            <span className="text-[10px] px-2 py-0.5 bg-amber-50 dark:bg-amber-950/20 text-amber-600 rounded-full font-bold">
-              {lowStock.length} Warning{lowStock.length !== 1 ? 's' : ''}
-            </span>
-          </CardHeader>
-          <CardContent className="flex-1 overflow-y-auto px-4 py-0 flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800/60">
-            {lowStock.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center gap-2 py-16 text-center">
-                <div className="w-10 h-10 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 rounded-full flex items-center justify-center">
-                  ✓
-                </div>
-                <p className="text-[11px] font-bold text-zinc-850 dark:text-zinc-300">All Ingredients Stocked</p>
-                <p className="text-[10px] text-zinc-400">All inventory items are above safety thresholds.</p>
-              </div>
-            ) : (
-              lowStock.map((item) => (
-                <div key={item.id} className="py-3 flex justify-between items-center text-xs">
-                  <div>
-                    <p className="font-bold text-zinc-850 dark:text-zinc-200">{item.name}</p>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">Supplier: {item.supplier_name || 'Generic'}</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-extrabold text-red-500">
-                      {item.stock_quantity} {item.unit}
-                    </span>
-                    <p className="text-[9px] text-zinc-400 mt-0.5">Min req: {item.low_stock_threshold} {item.unit}</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-          <div className="p-4 border-t border-zinc-100 dark:border-zinc-850/60 bg-zinc-50/50 dark:bg-zinc-900/10">
-            <Link href="/inventory" className="flex items-center justify-center gap-1.5 w-full py-2 bg-zinc-900 dark:bg-zinc-800 hover:bg-zinc-800 text-white rounded-xl text-xs font-semibold transition-colors">
-              Manage Inventory Stock <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-        </Card>
-      </div>
+      {/* Recent Orders History Section */}
+      <DashboardRecentOrders initialOrders={recentOrders} settings={settings} />
 
       {/* Bottom Row Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
