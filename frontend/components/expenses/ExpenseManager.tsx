@@ -107,7 +107,7 @@ export default function ExpenseManager({ initialExpenses, currencySymbol }: Expe
   const openEditModal = (exp: Expense) => {
     setEditingExpenseId(exp.id);
     reset({
-      category: exp.category,
+      category: exp.category as any,
       amount: Number(exp.amount),
       reason: exp.reason,
       notes: exp.notes || '',

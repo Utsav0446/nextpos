@@ -122,7 +122,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       const catMap: Record<string, number> = {};
       (todayItems || []).forEach((row: any) => {
         const menuItem = menuWithCats.find(m => m.id === row.menu_item_id);
-        const catName = menuItem?.category?.name;
+        const cat = menuItem?.category as any;
+        const catName = Array.isArray(cat) ? cat[0]?.name : cat?.name;
         if (catName) {
           catMap[catName] = (catMap[catName] || 0) + parseInt(row.quantity);
         }

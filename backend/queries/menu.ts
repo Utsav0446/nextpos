@@ -9,6 +9,59 @@ interface GetMenuItemsOptions {
   includeUnavailable?: boolean;
 }
 
+function prepareCustomOptions(item: any) {
+  let opts = Array.isArray(item.custom_options) ? [...item.custom_options] : [];
+  opts = opts.filter((o: any) => o.name !== 'Variants' && o.name !== 'Variant' && !o.is_variant);
+  if (item.has_variants && Array.isArray(item.variants) && item.variants.length > 0) {
+    const variantNames = item.variants.map((v: any) => v.name);
+    const variantPrices: Record<string, number> = {};
+    item.variants.forEach((v: any) => {
+      variantPrices[v.name] = Number(v.price) || 0;
+    });
+    opts.unshift({
+      name: 'Variants',
+      options: variantNames,
+      defaultOption: variantNames[0],
+      variantPrices,
+      is_variant: true
+    });
+  }
+  return opts;
+}
+
+function hydrateMenuItemVariants(m: any): MenuItem {
+  let has_variants = false;
+  let variants: { name: string; price: number }[] = [];
+  if (m.custom_options && Array.isArray(m.custom_options)) {
+    const vOpt = m.custom_options.find((o: any) => o.name === 'Variants' || o.name === 'Variant' || o.is_variant);
+    if (vOpt) {
+      has_variants = true;
+      if (vOpt.variantPrices) {
+        variants = vOpt.options.map((name: string) => ({
+          name,
+          price: Number(vOpt.variantPrices[name]) || Number(m.price) || 0
+        }));
+      } else if (vOpt.options) {
+        variants = vOpt.options.map((optStr: string) => {
+          if (optStr.includes(':')) {
+            const [name, priceStr] = optStr.split(':');
+            return { name: name.trim(), price: Number(priceStr) || Number(m.price) || 0 };
+          }
+          return { name: optStr, price: Number(m.price) || 0 };
+        });
+      }
+    }
+  }
+  return {
+    ...m,
+    category_name: m.category?.name,
+    category_name_gu: m.category?.name_gu,
+    category_name_hi: m.category?.name_hi,
+    has_variants,
+    variants
+  };
+}
+
 export async function getMenuItems(options: GetMenuItemsOptions = {}): Promise<MenuItem[]> {
   const { search, categoryId, limit, offset, includeUnavailable = true } = options;
 
@@ -43,12 +96,7 @@ export async function getMenuItems(options: GetMenuItemsOptions = {}): Promise<M
   const { data, error } = await req;
   if (error) throw error;
 
-  return (data || []).map((m: any) => ({
-    ...m,
-    category_name: m.category?.name,
-    category_name_gu: m.category?.name_gu,
-    category_name_hi: m.category?.name_hi,
-  }));
+  return (data || []).map(hydrateMenuItemVariants);
 }
 
 export async function countMenuItems(options: Omit<GetMenuItemsOptions, 'limit' | 'offset'> = {}): Promise<number> {
@@ -94,12 +142,7 @@ export async function getMenuItemById(id: number): Promise<MenuItem | null> {
   if (error) throw error;
   if (!data || (data.category && data.category.deleted_at !== null)) return null;
 
-  return {
-    ...data,
-    category_name: data.category?.name,
-    category_name_gu: data.category?.name_gu,
-    category_name_hi: data.category?.name_hi,
-  };
+  return hydrateMenuItemVariants(data);
 }
 
 export async function createMenuItem(item: {
@@ -123,7 +166,14 @@ export async function createMenuItem(item: {
   default_prep: string;
   default_texture: string;
   show_popup: boolean;
+  allow_sitting?: boolean;
+  allow_parcel?: boolean;
+  has_variants?: boolean;
+  variants?: { name: string; price: number }[];
+  custom_options?: { name: string; options: string[]; defaultOption?: string }[];
 }): Promise<MenuItem> {
+  const finalCustomOptions = prepareCustomOptions(item);
+
   const { data, error } = await supabase
     .from('menu_items')
     .insert({
@@ -147,12 +197,15 @@ export async function createMenuItem(item: {
       default_prep: item.default_prep || 'Regular',
       default_texture: item.default_texture || 'Regular',
       show_popup: item.show_popup ?? true,
+      allow_sitting: item.allow_sitting ?? true,
+      allow_parcel: item.allow_parcel ?? true,
+      custom_options: finalCustomOptions,
     })
     .select()
     .single();
 
   if (error) throw error;
-  return data;
+  return hydrateMenuItemVariants(data);
 }
 
 export async function updateMenuItem(
@@ -178,8 +231,15 @@ export async function updateMenuItem(
     default_prep: string;
     default_texture: string;
     show_popup: boolean;
+    allow_sitting?: boolean;
+    allow_parcel?: boolean;
+    has_variants?: boolean;
+    variants?: { name: string; price: number }[];
+    custom_options?: { name: string; options: string[]; defaultOption?: string }[];
   }
 ): Promise<MenuItem | null> {
+  const finalCustomOptions = prepareCustomOptions(item);
+
   const { data, error } = await supabase
     .from('menu_items')
     .update({
@@ -203,6 +263,9 @@ export async function updateMenuItem(
       default_prep: item.default_prep,
       default_texture: item.default_texture,
       show_popup: item.show_popup,
+      allow_sitting: item.allow_sitting ?? true,
+      allow_parcel: item.allow_parcel ?? true,
+      custom_options: finalCustomOptions,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -211,7 +274,7 @@ export async function updateMenuItem(
     .maybeSingle();
 
   if (error) throw error;
-  return data;
+  return data ? hydrateMenuItemVariants(data) : null;
 }
 
 export async function softDeleteMenuItem(id: number): Promise<boolean> {

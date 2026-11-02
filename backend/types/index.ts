@@ -42,6 +42,11 @@ export interface MenuItem {
   default_prep?: string;
   default_texture?: string;
   show_popup?: boolean;
+  has_variants?: boolean;
+  variants?: { name: string; price: number }[];
+  custom_options?: { name: string; options: string[]; defaultOption?: string; variantPrices?: Record<string, number> }[];
+  allow_sitting?: boolean;
+  allow_parcel?: boolean;
   created_at: Date;
   updated_at: Date;
   deleted_at?: Date | null;
@@ -55,6 +60,7 @@ export interface OrderItem {
   quantity: number;
   price: number; // Price at purchase time
   total_price: number;
+  notes?: string | null;
 }
 
 export type OrderType = 'Dine-In' | 'Takeaway';
@@ -104,6 +110,35 @@ export interface Supplier {
   updated_at: Date;
 }
 
+export interface InventoryItem {
+  id: number;
+  name: string;
+  unit: string;
+  current_stock: number;
+  reorder_level: number;
+  stock_quantity?: number;
+  low_stock_threshold?: number;
+  supplier_id?: number | null;
+  supplier_name?: string | null;
+  created_at?: Date;
+  updated_at?: Date;
+}
+
+export interface PurchaseRecord {
+  id: number;
+  inventory_item_id: number;
+  supplier_id?: number | null;
+  supplier_name?: string | null;
+  inventory_name?: string | null;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  total_cost?: number;
+  purchase_date: Date;
+  notes?: string | null;
+  created_at?: Date;
+}
+
 
 export interface RestaurantSettings {
   id: number;
@@ -113,21 +148,12 @@ export interface RestaurantSettings {
   gstin?: string | null;
   gst_percentage: number;
   currency: string;
-  printer_name?: string | null;
-  print_kot_automatically: boolean;
   enable_token_number: boolean;
-  printer_ip?: string | null;
-  printer_port: number;
-  bill_printer_ip?: string | null;
-  bill_printer_port: number;
-  kot_printer_ip?: string | null;
-  kot_printer_port: number;
   enable_gst: boolean;
   logo_url?: string | null;
   receipt_header?: string | null;
   receipt_footer?: string | null;
-  kot_copies: number;
-  paper_width: string;
+
   updated_at: Date;
 }
 
@@ -159,7 +185,10 @@ export interface DailyReportRow {
   revenue: number;
   expenses: number;
   profit: number;
-  average_order_val: number;
+  average_order_value: number;
   cancelled_orders: number;
   top_item: string;
 }
+
+
+

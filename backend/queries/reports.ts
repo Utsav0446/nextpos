@@ -187,7 +187,7 @@ export async function getFinancialSummary(startDate: string, endDate: string) {
       const catPerformanceMap: Record<string, { quantity: number; revenue: number }> = {};
       items.forEach((row: any) => {
         const menuItem = menuWithCats.find(m => m.id === row.menu_item_id);
-        const catName = menuItem?.category?.name || 'Uncategorized';
+        const catName = (menuItem?.category as any)?.name || 'Uncategorized';
         
         if (!catPerformanceMap[catName]) {
           catPerformanceMap[catName] = { quantity: 0, revenue: 0 };

@@ -4,7 +4,7 @@ const encoder = new TextEncoder();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'restaurant_pos_secret_jwt_key_2026_change_in_prod';
 
-function arrayBufferToBase64Url(buffer: ArrayBuffer): string {
+function arrayBufferToBase64Url(buffer: ArrayBuffer | Uint8Array): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {

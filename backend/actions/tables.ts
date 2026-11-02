@@ -120,16 +120,44 @@ export async function deleteTableAction(id: number) {
  */
 export async function setTableStatusAction(id: number, status: 'Available' | 'Dirty') {
   try {
-    // Block status changes on merged child tables
-    const mergeCheck = await query('SELECT merged_with FROM restaurant_tables WHERE id = $1', [id]);
-    if (mergeCheck.rows[0]?.merged_with) {
+    // Fetch table details
+    const mergeCheck = await query('SELECT table_number, merged_with FROM restaurant_tables WHERE id = $1', [id]);
+    const tblRow = mergeCheck.rows[0];
+
+    if (tblRow?.merged_with) {
       return { error: 'Cannot change status of a merged child table. Use the primary table instead.' };
+    }
+
+    // When marking Dirty or Available, complete all active pending/preparing orders for this table session
+    if (tblRow?.table_number) {
+      const tblNum = tblRow.table_number.trim();
+      await query(
+        "UPDATE orders SET status = 'Completed', updated_at = CURRENT_TIMESTAMP WHERE LOWER(table_number) = LOWER($1) AND status IN ('Pending', 'Preparing')",
+        [tblNum]
+      );
+
+      try {
+        const { supabase } = await import('@/db');
+        await supabase
+          .from('orders')
+          .update({ status: 'Completed', updated_at: new Date().toISOString() })
+          .ilike('table_number', tblNum)
+          .in('status', ['Pending', 'Preparing']);
+      } catch (e) {}
     }
 
     await query('UPDATE restaurant_tables SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [
       status,
       id,
     ]);
+
+    try {
+      const { supabase } = await import('@/db');
+      await supabase
+        .from('restaurant_tables')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
+    } catch (e) {}
 
     // If this is a merge primary, propagate status to all children
     await query('UPDATE restaurant_tables SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE merged_with = $2', [

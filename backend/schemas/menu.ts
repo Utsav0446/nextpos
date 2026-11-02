@@ -30,6 +30,18 @@ export const menuItemSchema = z.object({
   default_prep: z.string().default('Regular'),
   default_texture: z.string().default('Regular'),
   show_popup: z.boolean().default(true),
+  allow_sitting: z.boolean().default(true),
+  allow_parcel: z.boolean().default(true),
+  has_variants: z.boolean().default(false).optional(),
+  variants: z.array(z.object({
+    name: z.string(),
+    price: z.coerce.number().nonnegative('Variant price must be 0 or greater')
+  })).default([]).optional(),
+  custom_options: z.array(z.object({
+    name: z.string(),
+    options: z.array(z.string()),
+    defaultOption: z.string().optional()
+  })).default([]),
 });
 
 export type CategoryInput = z.infer<typeof categorySchema>;

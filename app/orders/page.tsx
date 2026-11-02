@@ -34,7 +34,6 @@ export default async function POSPage({ searchParams }: POSPageProps) {
       currencyCode={settings.currency}
       preselectedTable={preselectedTable}
       preselectedType={preselectedType}
-      printKOTAutomatically={settings.print_kot_automatically}
     />
   );
 }

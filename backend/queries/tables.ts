@@ -63,10 +63,15 @@ export async function getTables(): Promise<RestaurantTable[]> {
   const now = new Date();
 
   const mappedTables = (tablesData || []).map(row => {
-    // Find active order for this table
-    const activeOrder = (activeOrders || []).find(o => 
+    // Find ALL active orders for this table
+    const tableOrders = (activeOrders || []).filter(o => 
       o.table_number && o.table_number.trim().toLowerCase() === row.table_number.trim().toLowerCase()
     );
+
+    // Sort by created_at ascending (oldest first) so we get the true start of the session
+    tableOrders.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    const firstOrder = tableOrders.length > 0 ? tableOrders[0] : null;
 
     const children = childrenMap.get(row.id);
     const isMergePrimary = !!children && children.numbers.length > 0;
@@ -85,15 +90,28 @@ export async function getTables(): Promise<RestaurantTable[]> {
 
     // Resolve status
     let status = row.status;
-    if (activeOrder) {
+    if (firstOrder) {
       status = 'Occupied';
     }
 
     let elapsed_minutes: number | undefined = undefined;
-    if (activeOrder) {
-      const elapsedMs = now.getTime() - new Date(activeOrder.created_at).getTime();
-      elapsed_minutes = Math.floor(elapsedMs / 60000);
+    if (firstOrder) {
+      let createdAt = firstOrder.created_at;
+      if (!createdAt.includes('Z') && !createdAt.includes('+')) {
+        createdAt += 'Z';
+      }
+      const elapsedMs = now.getTime() - new Date(createdAt).getTime();
+      elapsed_minutes = Math.max(0, Math.floor(elapsedMs / 60000));
     }
+
+    // Calculate aggregated grand_total
+    let totalGrandTotal = undefined;
+    if (tableOrders.length > 0) {
+      totalGrandTotal = tableOrders.reduce((sum, o) => sum + Number(o.grand_total || 0), 0);
+    }
+
+    // Find the first non-null customer name
+    const customerName = tableOrders.find(o => o.customer_name)?.customer_name;
 
     return {
       id: row.id,
@@ -101,9 +119,9 @@ export async function getTables(): Promise<RestaurantTable[]> {
       capacity: row.capacity,
       original_capacity: row.original_capacity || row.capacity,
       status: status as any,
-      active_order_id: activeOrder?.id || undefined,
-      customer_name: activeOrder?.customer_name || undefined,
-      grand_total: activeOrder?.grand_total ? Number(activeOrder.grand_total) : undefined,
+      active_order_id: firstOrder?.id || undefined,
+      customer_name: customerName || undefined,
+      grand_total: totalGrandTotal,
       elapsed_minutes,
       merged_with: row.merged_with || null,
       merged_children: isMergePrimary ? children!.numbers : undefined,

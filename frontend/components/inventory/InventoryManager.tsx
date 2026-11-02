@@ -400,7 +400,7 @@ export default function InventoryManager({
                       {formatCurrency(pur.unit_price, currencySymbol === '$' ? 'USD' : 'INR')}
                     </td>
                     <td className="px-6 py-4.5 font-bold text-red-650 dark:text-red-400">
-                      -{formatCurrency(pur.total_cost, currencySymbol === '$' ? 'USD' : 'INR')}
+                      -{formatCurrency(pur.total_cost || pur.total_price || 0, currencySymbol === '$' ? 'USD' : 'INR')}
                     </td>
                     <td className="px-6 py-4.5 text-zinc-500">
                       {pur.supplier_name || 'Generic / Walk-in buy'}

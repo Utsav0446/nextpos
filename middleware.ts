@@ -12,15 +12,13 @@ const protectedPaths = [
   '/reports',
   '/settings',
   '/tables',
-  '/kitchen',
 ];
 
 // Define role-based path permissions
 const rolePermissions: Record<string, string[]> = {
-  Admin: ['/dashboard', '/menu', '/orders', '/billing', '/expenses', '/reports', '/settings', '/tables', '/kitchen'],
-  Cashier: ['/dashboard', '/tables', '/orders', '/billing', '/settings', '/kitchen'],
-  Waiter: ['/tables', '/orders', '/kitchen'],
-  Kitchen: ['/orders', '/kitchen'],
+  Admin: ['/dashboard', '/menu', '/orders', '/billing', '/expenses', '/reports', '/settings', '/tables'],
+  Cashier: ['/dashboard', '/tables', '/orders', '/billing', '/settings'],
+  Waiter: ['/tables', '/orders'],
 };
 
 export async function middleware(request: NextRequest) {

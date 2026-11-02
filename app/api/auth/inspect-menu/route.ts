@@ -16,12 +16,15 @@ export async function GET() {
 
     const stats: Record<string, { categoryId: number | null, catDeleted: boolean, count: number, items: string[] }> = {};
     (items || []).forEach(r => {
-      const categoryName = r.category?.name;
+      const cat = r.category as any;
+      const categoryName = Array.isArray(cat) ? cat[0]?.name : cat?.name;
+      const catDeleted = Array.isArray(cat) ? !!cat[0]?.deleted_at : !!cat?.deleted_at;
+      
       const key = categoryName || `Unknown (${r.category_id})`;
       if (!stats[key]) {
         stats[key] = {
           categoryId: r.category_id,
-          catDeleted: !!r.category?.deleted_at,
+          catDeleted,
           count: 0,
           items: []
         };

@@ -184,7 +184,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                   </td>
                 </tr>
               ) : (
-                dailyBreakdown.map((row: any, idx) => (
+                dailyBreakdown.map((row: any, idx: number) => (
                   <tr key={idx} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/20 transition-colors">
                     <td className="px-6 py-4.5 font-bold text-zinc-850 dark:text-zinc-200">
                       {formatDateOnly(row.date)}

@@ -35,7 +35,6 @@ export default async function RootLayout({
 
   const headersList = await headers();
   const pathname = headersList.get('x-pathname') || '';
-  const isKitchen = pathname.startsWith('/kitchen');
 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`} suppressHydrationWarning>
@@ -56,7 +55,7 @@ export default async function RootLayout({
         />
         <LanguageProvider>
           <ToastProvider>
-            {admin && !isKitchen ? (
+            {admin ? (
               <div className="flex flex-col lg:flex-row h-screen overflow-hidden">
                  <Navbar adminEmail={admin.email} logoUrl={settings.logo_url} />
                  <main className="flex-1 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-950/50 flex flex-col">

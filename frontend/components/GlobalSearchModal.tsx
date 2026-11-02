@@ -141,7 +141,7 @@ export function GlobalSearchModal() {
                 {results.orders.map((ord) => (
                   <button
                     key={ord.id}
-                    onClick={() => navigateTo(`/billing?id=${ord.id}`)}
+                    onClick={() => navigateTo('/orders')}
                     className="flex items-center justify-between p-2.5 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-left w-full transition-colors text-xs text-zinc-650 dark:text-zinc-300 active:bg-zinc-100"
                   >
                     <div className="flex items-center gap-2">

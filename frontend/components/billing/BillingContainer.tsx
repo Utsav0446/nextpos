@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
 import { completeOrderAction, deleteOrderAction } from '@/actions/orders';
-import { printBillAction } from '@/actions/print';
 import { formatCurrency, formatDate } from '@/utils/format';
-import { Receipt, CreditCard, Landmark, DollarSign, Printer, CheckCircle2, Search, XCircle } from 'lucide-react';
+import { Receipt, CreditCard, Landmark, DollarSign, CheckCircle2, Search, XCircle } from 'lucide-react';
 
 interface BillingContainerProps {
   initialPendingOrders: Order[];
@@ -26,15 +25,70 @@ export default function BillingContainer({
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>(initialPendingOrders);
   
-  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(() => {
-    if (preselectedOrderId) return preselectedOrderId;
+  // Group orders by table for Dine-In
+  const groupedOrders = useMemo(() => {
+    const groups = new Map<string, any>();
+    orders.forEach(o => {
+      if (o.order_type === 'Dine-In' && o.table_number) {
+        const key = `TABLE_${o.table_number}`;
+        if (!groups.has(key)) {
+          groups.set(key, { 
+            id: key, 
+            table_number: o.table_number,
+            customer_name: o.customer_name,
+            order_type: o.order_type,
+            subtotal: Number(o.subtotal),
+            tax: Number(o.tax),
+            discount: Number(o.discount),
+            grand_total: Number(o.grand_total),
+            created_at: o.created_at,
+            items: [...(o.items || [])],
+            relatedOrders: [o],
+            isGroup: true 
+          });
+        } else {
+          const g = groups.get(key);
+          g.relatedOrders.push(o);
+          g.subtotal += Number(o.subtotal);
+          g.tax += Number(o.tax);
+          g.discount += Number(o.discount);
+          g.grand_total += Number(o.grand_total);
+          g.items.push(...(o.items || []));
+          if (!g.customer_name && o.customer_name) g.customer_name = o.customer_name;
+        }
+      } else {
+        groups.set(`ORDER_${o.id}`, { 
+          id: `ORDER_${o.id}`,
+          table_number: o.table_number,
+          customer_name: o.customer_name,
+          order_type: o.order_type,
+          subtotal: Number(o.subtotal),
+          tax: Number(o.tax),
+          discount: Number(o.discount),
+          grand_total: Number(o.grand_total),
+          created_at: o.created_at,
+          items: [...(o.items || [])],
+          relatedOrders: [o],
+          isGroup: false 
+        });
+      }
+    });
+    return Array.from(groups.values());
+  }, [orders]);
+
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(() => {
     if (preselectedTable) {
-      const match = initialPendingOrders.find(
-        (o) => o.table_number && o.table_number.toLowerCase() === preselectedTable.toLowerCase()
-      );
-      if (match) return match.id;
+      return `TABLE_${preselectedTable}`;
     }
-    return initialPendingOrders.length > 0 ? initialPendingOrders[0].id : null;
+    if (preselectedOrderId) {
+      // Find if it belongs to a table
+      const match = initialPendingOrders.find(o => o.id === preselectedOrderId);
+      if (match && match.order_type === 'Dine-In' && match.table_number) {
+        return `TABLE_${match.table_number}`;
+      }
+      return `ORDER_${preselectedOrderId}`;
+    }
+    return groupedOrders.length > 0 ? groupedOrders[0].id : null;
   });
   
   // Search orders
@@ -46,17 +100,17 @@ export default function BillingContainer({
   const [extraDiscount, setExtraDiscount] = useState<string>('0');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const selectedOrder = useMemo(() => {
-    return orders.find((o) => o.id === selectedOrderId) || null;
-  }, [orders, selectedOrderId]);
+  const selectedGroup = useMemo(() => {
+    return groupedOrders.find((g) => g.id === selectedGroupId) || null;
+  }, [groupedOrders, selectedGroupId]);
 
   // Calculations for modifications
   const billingSummary = useMemo(() => {
-    if (!selectedOrder) return { subtotal: 0, tax: 0, discount: 0, grandTotal: 0, remaining: 0 };
+    if (!selectedGroup) return { subtotal: 0, tax: 0, discount: 0, grandTotal: 0, remaining: 0 };
     
-    const subtotal = Number(selectedOrder.subtotal);
-    const tax = Number(selectedOrder.tax);
-    const currentDiscount = Number(selectedOrder.discount);
+    const subtotal = Number(selectedGroup.subtotal);
+    const tax = Number(selectedGroup.tax);
+    const currentDiscount = Number(selectedGroup.discount);
     
     // New total if discount is adjusted at checkout
     const newDiscount = Math.min(subtotal + tax, Number(extraDiscount) || 0);
@@ -72,32 +126,35 @@ export default function BillingContainer({
       remaining,
       changeDue: paidVal > grandTotal ? paidVal - grandTotal : 0
     };
-  }, [selectedOrder, extraDiscount, amountPaid]);
+  }, [selectedGroup, extraDiscount, amountPaid]);
 
-  // Set default paid value when order changes
+  // Set default paid value when group changes
   React.useEffect(() => {
-    if (selectedOrder) {
-      setExtraDiscount(String(selectedOrder.discount));
-      setAmountPaid(String(selectedOrder.grand_total));
+    if (selectedGroup) {
+      setExtraDiscount(String(selectedGroup.discount));
+      setAmountPaid(String(selectedGroup.grand_total));
     }
-  }, [selectedOrder]);
+  }, [selectedGroup]);
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter(
-      (o) =>
-        o.id.toString().includes(searchQuery) ||
-        (o.customer_name && o.customer_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (o.table_number && o.table_number.includes(searchQuery))
+  const filteredGroups = useMemo(() => {
+    return groupedOrders.filter(
+      (g) =>
+        g.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (g.customer_name && g.customer_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (g.table_number && g.table_number.toLowerCase().includes(searchQuery.toLowerCase()))
     );
-  }, [orders, searchQuery]);
+  }, [groupedOrders, searchQuery]);
 
   const handleCompleteBilling = async () => {
-    if (!selectedOrder) return;
+    if (!selectedGroup) return;
     
     setIsSubmitting(true);
     try {
-      const res = await completeOrderAction(
-        selectedOrder.id,
+      const orderIds = selectedGroup.relatedOrders.map((o: Order) => o.id);
+      const { completeMultipleOrdersAction } = await import('@/actions/orders');
+
+      const res = await completeMultipleOrdersAction(
+        orderIds,
         paymentType,
         Number(amountPaid) || billingSummary.grandTotal,
         billingSummary.discount
@@ -106,27 +163,16 @@ export default function BillingContainer({
       if (res.error) {
         toast(res.error, 'error');
       } else {
-        toast(`Order #${selectedOrder.id} billing completed successfully.`, 'success');
+        toast(`Billing completed successfully.`, 'success');
 
-        // Trigger thermal receipt print job
-        const printRes = await printBillAction(selectedOrder.id);
-        if (printRes.error) {
-          toast(`Billing completed, but print failed: ${printRes.error}`, 'error');
-        } else {
-          toast('Thermal print job fired successfully.', 'success');
-        }
+
         
-        // Remove completed order from lists
-        const updated = orders.filter((o) => o.id !== selectedOrder.id);
+        // Remove completed orders from lists
+        const updated = orders.filter((o) => !orderIds.includes(o.id));
         setOrders(updated);
         
-        // Select next order if available
-        setSelectedOrderId(updated.length > 0 ? updated[0].id : null);
-        
-        // Trigger browser print receipt copy
-        setTimeout(() => {
-          window.print();
-        }, 100);
+        // Let the effect select the next group
+        setSelectedGroupId(null);
       }
     } catch (err) {
       toast('Failed to close bill.', 'error');
@@ -136,19 +182,23 @@ export default function BillingContainer({
   };
 
   const handleCancelOrder = async () => {
-    if (!selectedOrder) return;
-    if (!window.confirm(`Are you sure you want to cancel order #${selectedOrder.id}?`)) return;
+    if (!selectedGroup) return;
+    if (!window.confirm(`Are you sure you want to cancel ${selectedGroup.isGroup ? 'all orders for Table ' + selectedGroup.table_number : 'Order #' + selectedGroup.relatedOrders[0].id}?`)) return;
 
     try {
-      const res = await deleteOrderAction(selectedOrder.id);
-      if (res.success) {
-        toast('Order deleted.', 'info');
-        const updated = orders.filter((o) => o.id !== selectedOrder.id);
-        setOrders(updated);
-        setSelectedOrderId(updated.length > 0 ? updated[0].id : null);
+      const orderIds = selectedGroup.relatedOrders.map((o: Order) => o.id);
+      let successCount = 0;
+      for (const id of orderIds) {
+        const res = await deleteOrderAction(id);
+        if (res.success) successCount++;
       }
+      
+      toast(`Cancelled ${successCount} order(s).`, 'info');
+      const updated = orders.filter((o) => !orderIds.includes(o.id));
+      setOrders(updated);
+      setSelectedGroupId(null);
     } catch (err) {
-      toast('Failed to delete order.', 'error');
+      toast('Failed to delete order(s).', 'error');
     }
   };
 
@@ -156,7 +206,7 @@ export default function BillingContainer({
     <div className="flex-1 flex flex-col md:flex-row h-[calc(100vh-64px)] overflow-hidden">
       {/* 1. ORDER SIDEBAR LIST */}
       <div className={`w-full md:w-80 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/10 dark:bg-zinc-950/20 flex flex-col shrink-0 ${
-        selectedOrderId ? 'hidden md:flex' : 'flex'
+        selectedGroupId ? 'hidden md:flex' : 'flex'
       }`}>
         <div className="p-4 border-b border-zinc-150 dark:border-zinc-800 flex flex-col gap-3">
           <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-widest">
@@ -175,26 +225,26 @@ export default function BillingContainer({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
-          {filteredOrders.length === 0 ? (
+          {filteredGroups.length === 0 ? (
             <p className="text-center text-xs text-zinc-400 py-12">No active orders found.</p>
           ) : (
-            filteredOrders.map((order) => (
+            filteredGroups.map((group) => (
               <div
-                key={order.id}
-                onClick={() => setSelectedOrderId(order.id)}
+                key={group.id}
+                onClick={() => setSelectedGroupId(group.id)}
                 className={`p-3 rounded-xl border text-xs cursor-pointer transition-all duration-150 select-none ${
-                  selectedOrderId === order.id
+                  selectedGroupId === group.id
                     ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-50 dark:border-zinc-50 dark:text-zinc-950 shadow-sm'
                     : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-850 text-zinc-650 dark:text-zinc-400'
                 }`}
               >
                 <div className="flex justify-between items-center font-bold">
-                  <span>Order #{order.id}</span>
-                  <span>{formatCurrency(order.grand_total, settings.currency)}</span>
+                  <span>{group.isGroup ? `Table ${group.table_number}` : `Order #${group.relatedOrders[0].id}`}</span>
+                  <span>{formatCurrency(group.grand_total, settings.currency)}</span>
                 </div>
                 <div className="flex justify-between items-center text-[10px] mt-1.5 opacity-80">
-                  <span>{order.order_type} {order.table_number ? `(T${order.table_number})` : ''}</span>
-                  <span>{order.customer_name || 'Walk-In'}</span>
+                  <span>{group.order_type} {group.isGroup ? `(${group.relatedOrders.length} KOTs)` : (group.table_number ? `(T${group.table_number})` : '')}</span>
+                  <span>{group.customer_name || 'Walk-In'}</span>
                 </div>
               </div>
             ))
@@ -204,16 +254,16 @@ export default function BillingContainer({
 
       {/* 2. ORDER BILL DETAILS */}
       <div className={`flex-1 flex flex-col md:flex-row overflow-hidden bg-white dark:bg-zinc-900 ${
-        selectedOrderId ? 'flex' : 'hidden md:flex'
+        selectedGroupId ? 'flex' : 'hidden md:flex'
       }`}>
-        {selectedOrder ? (
+        {selectedGroup ? (
           <>
             {/* Left: Invoice items breakdown */}
             <div className="flex-1 p-6 overflow-y-auto flex flex-col gap-6 border-r border-zinc-100 dark:border-zinc-800">
               <div className="flex justify-between items-start border-b border-zinc-100 dark:border-zinc-800 pb-4">
                 <div className="flex flex-col gap-2">
                   <button
-                    onClick={() => setSelectedOrderId(null)}
+                    onClick={() => setSelectedGroupId(null)}
                     className="md:hidden flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-zinc-700 pb-1"
                   >
                     ← Back to Bills List
@@ -231,17 +281,17 @@ export default function BillingContainer({
                     </div>
                   )}
                   <h2 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-100">
-                    {selectedOrder.table_number ? `Table No: ${selectedOrder.table_number}` : `Order #${selectedOrder.id}`}
+                    {selectedGroup.isGroup ? `Table No: ${selectedGroup.table_number}` : `Order #${selectedGroup.relatedOrders[0].id}`}
                   </h2>
                   <p className="text-[10px] text-zinc-400 mt-1">
-                    Placed: {formatDate(selectedOrder.created_at)}
+                    Placed: {formatDate(selectedGroup.created_at)}
                   </p>
                 </div>
                 <button
                   onClick={handleCancelOrder}
                   className="text-[10px] text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/60 font-semibold transition-colors"
                 >
-                  Cancel Order
+                  Cancel Order(s)
                 </button>
               </div>
 
@@ -249,7 +299,7 @@ export default function BillingContainer({
               <div className="flex-col flex gap-3.5">
                 <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest pl-1">Items Summary</h4>
                 <div className="flex flex-col gap-3">
-                  {selectedOrder.items?.map((item, idx) => (
+                  {selectedGroup.items?.map((item: any, idx: number) => (
                     <div key={idx} className="flex justify-between items-center text-xs">
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-zinc-850 dark:text-zinc-200">{item.name}</p>
@@ -266,10 +316,12 @@ export default function BillingContainer({
               </div>
 
               {/* Notes */}
-              {selectedOrder.notes && (
+              {selectedGroup.relatedOrders.some((o: Order) => o.notes) && (
                 <div className="bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-150 dark:border-zinc-850 p-3.5 rounded-xl text-[10px] text-zinc-650 dark:text-zinc-400 leading-relaxed mt-2">
                   <span className="font-bold text-zinc-900 dark:text-zinc-200 uppercase tracking-wider block mb-1">Kitchen Notes:</span>
-                  {selectedOrder.notes}
+                  {selectedGroup.relatedOrders.filter((o: Order) => o.notes).map((o: Order, i: number) => (
+                    <div key={i} className="mb-1">{selectedGroup.isGroup && <span className="font-semibold">KOT {i+1}: </span>}{o.notes}</div>
+                  ))}
                 </div>
               )}
             </div>
@@ -353,10 +405,10 @@ export default function BillingContainer({
                     <span>Grand Total</span>
                     <span>{formatCurrency(billingSummary.grandTotal, settings.currency)}</span>
                   </div>
-                  {billingSummary.changeDue > 0 && (
+                  {(billingSummary.changeDue || 0) > 0 && (
                     <div className="flex justify-between items-center text-sm font-extrabold text-emerald-600 mt-1">
                       <span>Change Due</span>
-                      <span>{formatCurrency(billingSummary.changeDue, settings.currency)}</span>
+                      <span>{formatCurrency(billingSummary.changeDue || 0, settings.currency)}</span>
                     </div>
                   )}
                 </div>
@@ -369,14 +421,10 @@ export default function BillingContainer({
                   className="w-full py-3.5 text-xs font-bold flex items-center justify-center gap-2"
                   isLoading={isSubmitting}
                 >
-                  <CheckCircle2 className="w-4 h-4" /> Collect &amp; Print Receipt
-                </Button>
-                <Button
-                  onClick={() => window.print()}
-                  variant="outline"
-                  className="w-full py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 bg-white dark:bg-zinc-900"
-                >
-                  <Printer className="w-3.5 h-3.5" /> Re-Print Receipt (Ctrl+P)
+                  <CheckCircle2 className="w-4 h-4" />
+                  {selectedGroup?.order_type === 'Takeaway'
+                    ? 'Collect Parcel Bill'
+                    : 'Collect Receipt'}
                 </Button>
               </div>
             </div>
@@ -390,122 +438,6 @@ export default function BillingContainer({
         )}
       </div>
 
-      {/* 3. SIMULATED THERMAL PRINT ONLY TEMPLATE (HIDDEN ON SCREEN, VISIBLE ON Ctrl+P) */}
-      {selectedOrder && (
-        <div id="print-receipt" className="hidden font-mono text-[10px] leading-relaxed text-black p-4 w-[80mm] max-w-[80mm] bg-white border border-dashed border-gray-300">
-          <div className="text-center flex flex-col items-center gap-1 border-b border-dashed border-black pb-3">
-            {settings.logo_url && (
-              <img 
-                src={settings.logo_url} 
-                alt="Logo" 
-                className="h-10 object-contain mb-1.5"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-            )}
-            <h2 className="text-xs font-extrabold uppercase tracking-tight">{settings.restaurant_name}</h2>
-            <p className="text-[8px] whitespace-pre-wrap">{settings.address}</p>
-            {settings.phone && <p className="text-[8px]">Tel: {settings.phone}</p>}
-            {settings.gstin && <p className="text-[8px]">GSTIN: {settings.gstin}</p>}
-          </div>
-
-          <div className="flex flex-col gap-0.5 py-3 border-b border-dashed border-black">
-            <div className="flex justify-between">
-              <span>Bill No: #{selectedOrder.id}</span>
-              <span>Type: {selectedOrder.order_type}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Date: {formatDate(selectedOrder.created_at)}</span>
-              {selectedOrder.table_number && <span>Table: {selectedOrder.table_number}</span>}
-            </div>
-            <p>Customer: {selectedOrder.customer_name || 'Walk-In'}</p>
-          </div>
-
-          {/* Items Header */}
-          <div className="py-2 border-b border-dashed border-black flex flex-col gap-1">
-            <div className="flex font-bold">
-              <span className="flex-1">Item</span>
-              <span className="w-10 text-center">Qty</span>
-              <span className="w-16 text-right">Amt</span>
-            </div>
-            <div className="border-t border-dotted border-black/40 my-1" />
-            {selectedOrder.items?.map((item, idx) => (
-              <div key={idx} className="flex">
-                <span className="flex-1 truncate">{item.name}</span>
-                <span className="w-10 text-center">{item.quantity}</span>
-                <span className="w-16 text-right">
-                  {formatCurrency(Number(item.price) * item.quantity, settings.currency)}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Totals calculations */}
-          <div className="flex flex-col gap-0.5 py-3 border-b border-dashed border-black text-right">
-            <div className="flex justify-between">
-              <span>Subtotal:</span>
-              <span>{formatCurrency(billingSummary.subtotal, settings.currency)}</span>
-            </div>
-            {Number(billingSummary.tax) > 0 && (
-              <div className="flex justify-between">
-                <span>GST ({settings.gst_percentage}%):</span>
-                <span>{formatCurrency(billingSummary.tax, settings.currency)}</span>
-              </div>
-            )}
-            {billingSummary.discount > 0 && (
-              <div className="flex justify-between">
-                <span>Discount:</span>
-                <span>-{formatCurrency(billingSummary.discount, settings.currency)}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-bold text-xs pt-1.5 border-t border-dotted border-black/40 mt-1">
-              <span>Grand Total:</span>
-              <span>{formatCurrency(billingSummary.grandTotal, settings.currency)}</span>
-            </div>
-          </div>
-
-          {/* Payment Method */}
-          <div className="py-3 text-center border-b border-dashed border-black">
-            <p className="font-bold">Paid via {paymentType}</p>
-            <p className="text-[8px] mt-0.5">Amount received: {formatCurrency(Number(amountPaid) || billingSummary.grandTotal, settings.currency)}</p>
-            {billingSummary.changeDue > 0 && (
-              <p className="font-bold text-[9px] mt-0.5">Balance Return: {formatCurrency(billingSummary.changeDue, settings.currency)}</p>
-            )}
-          </div>
-
-          <div className="text-center pt-3 flex flex-col gap-0.5 opacity-90">
-            <p className="font-bold uppercase tracking-wider text-[8px]">Thank you! Visit again!</p>
-            <p className="text-[6px] italic">System generated copy</p>
-          </div>
-        </div>
-      )}
-
-      {/* Global CSS Inject to support print-layout Gating */}
-      <style jsx global>{`
-        @media print {
-          body {
-            background: white !important;
-            color: black !important;
-          }
-          /* Hide main app shells, wrappers, navbars */
-          body > :not(#print-receipt) {
-            display: none !important;
-          }
-          aside, main, header, footer, button, nav {
-            display: none !important;
-          }
-          #print-receipt {
-            display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 80mm !important;
-            margin: 0 !important;
-            padding: 10px !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

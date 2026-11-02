@@ -18,8 +18,11 @@ import {
   splitTableForSharingAction,
   rejoinSplitTablesAction
 } from '@/actions/tables';
+
 import { formatCurrency } from '@/utils/format';
 import { getTables } from '@/queries/tables';
+import { getRelatedOrdersForBillAction, getRecentOrdersAction, getItemWiseSalesAction, removeOrderItemAction } from '@/actions/orders';
+import { Order } from '@/types';
 import { 
   Utensils, 
   User, 
@@ -36,7 +39,18 @@ import {
   Link2,
   Unlink2,
   Check,
-  Settings
+  Settings,
+  ArrowLeft,
+  RefreshCw,
+  Menu,
+  Users,
+  List,
+  Play,
+  X,
+  Tag,
+  Eye,
+  Pencil,
+  Receipt
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -57,6 +71,9 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
   const [statusFilter, setStatusFilter] = useState<'all' | 'Available' | 'Occupied' | 'Dirty'>('all');
 
   // Modals state
+  const [isRunningModalOpen, setIsRunningModalOpen] = useState(false);
+  const [isStartTableModalOpen, setIsStartTableModalOpen] = useState(false);
+  const [startTableTarget, setStartTableTarget] = useState<RestaurantTable | null>(null);
   const [isUpsertModalOpen, setIsUpsertModalOpen] = useState(false);
   const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
   
@@ -64,6 +81,8 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitChildSeats, setSplitChildSeats] = useState(1);
+  const [activeSessionOrders, setActiveSessionOrders] = useState<Order[]>([]);
+  const [isLoadingActiveSession, setIsLoadingActiveSession] = useState(false);
 
   const [isSwapModalOpen, setIsSwapModalOpen] = useState(false);
   const [targetTableNum, setTargetTableNum] = useState('');
@@ -72,6 +91,84 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
   const [isMergeMode, setIsMergeMode] = useState(false);
   const [selectedMergeIds, setSelectedMergeIds] = useState<number[]>([]);
   const [isManageMode, setIsManageMode] = useState(false);
+
+  // Top Right Header Menu & Modals State
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [isRecentOrdersModalOpen, setIsRecentOrdersModalOpen] = useState(false);
+  const [recentOrdersList, setRecentOrdersList] = useState<Order[]>([]);
+  const [isLoadingRecentOrders, setIsLoadingRecentOrders] = useState(false);
+  const [recentOrdersSearchTerm, setRecentOrdersSearchTerm] = useState('');
+  const [isItemCountModalOpen, setIsItemCountModalOpen] = useState(false);
+  const [selectedRecentOrderView, setSelectedRecentOrderView] = useState<Order | null>(null);
+
+  // Sittings Layout Settings State matching Screenshots 1 & 2
+  const [isLayoutSettingsModalOpen, setIsLayoutSettingsModalOpen] = useState(false);
+  const [layoutActiveTab, setLayoutActiveTab] = useState<'THEME' | 'GENERAL'>('THEME');
+  const [tablesPerRow, setTablesPerRow] = useState<number>(3);
+  const [sessionManageBy, setSessionManageBy] = useState<'online' | 'offline'>('online');
+  const [isPerRowDropdownOpen, setIsPerRowDropdownOpen] = useState(false);
+
+  const handleOpenRecentOrders = async () => {
+    setIsHeaderMenuOpen(false);
+    setIsRecentOrdersModalOpen(true);
+    setIsLoadingRecentOrders(true);
+    try {
+      const res = await getRecentOrdersAction(40);
+      if (res.success && res.orders) {
+        setRecentOrdersList(res.orders as Order[]);
+      } else {
+        setRecentOrdersList([]);
+      }
+    } catch (err) {
+      setRecentOrdersList([]);
+    } finally {
+      setIsLoadingRecentOrders(false);
+    }
+  };
+
+  const filteredRecentOrders = useMemo(() => {
+    const term = recentOrdersSearchTerm.toLowerCase().trim();
+    if (!term) return recentOrdersList;
+    return recentOrdersList.filter(o => 
+      o.id.toString().includes(term) ||
+      (o.table_number && o.table_number.toLowerCase().includes(term)) ||
+      (o.customer_name && o.customer_name.toLowerCase().includes(term))
+    );
+  }, [recentOrdersList, recentOrdersSearchTerm]);
+
+  // Item-Wise Sales by Date State
+  const [selectedItemSalesDate, setSelectedItemSalesDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [itemSalesSearchTerm, setItemSalesSearchTerm] = useState('');
+  const [itemWiseSalesList, setItemWiseSalesList] = useState<{ name: string; qty: number; price: number; total: number }[]>([]);
+  const [isLoadingItemSales, setIsLoadingItemSales] = useState(false);
+
+  const fetchItemWiseSales = async (dateStr?: string) => {
+    setIsLoadingItemSales(true);
+    try {
+      const res = await getItemWiseSalesAction(dateStr || selectedItemSalesDate);
+      if (res.success && res.items) {
+        setItemWiseSalesList(res.items);
+      } else {
+        setItemWiseSalesList([]);
+      }
+    } catch (err) {
+      setItemWiseSalesList([]);
+    } finally {
+      setIsLoadingItemSales(false);
+    }
+  };
+
+  const handleOpenItemWiseModal = () => {
+    setIsHeaderMenuOpen(false);
+    setIsItemCountModalOpen(true);
+    fetchItemWiseSales(selectedItemSalesDate);
+  };
+
+  const filteredItemWiseSales = useMemo(() => {
+    const term = itemSalesSearchTerm.toLowerCase().trim();
+    if (!term) return itemWiseSalesList;
+    return itemWiseSalesList.filter(item => item.name.toLowerCase().includes(term));
+  }, [itemWiseSalesList, itemSalesSearchTerm]);
 
   // Table form inputs
   const [tableNumberInput, setTableNumberInput] = useState('');
@@ -107,10 +204,66 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
 
   // Available tables (excluding the currently active one) for Swap Select
   const availableTables = useMemo(() => {
-    return tables.filter(t => t.status === 'Available' && !t.is_merge_child);
-  }, [tables]);
+    return tables.filter(t => t.status === 'Available' && t.id !== selectedTable?.id);
+  }, [tables, selectedTable]);
+
+  const activeSessionTotals = useMemo(() => {
+    if (activeSessionOrders.length > 0) {
+      const subtotal = activeSessionOrders.reduce((sum, order) => {
+        const orderItemsSum = (order.items || []).reduce((iSum: number, item: any) => iSum + (Number(item.price) * (item.quantity || 1)), 0);
+        return sum + (order.grand_total || order.subtotal || orderItemsSum);
+      }, 0);
+      return { subtotal, total: subtotal };
+    }
+    const fallbackTotal = selectedTable?.grand_total || 0;
+    return { subtotal: fallbackTotal, total: fallbackTotal };
+  }, [activeSessionOrders, selectedTable]);
+
+  React.useEffect(() => {
+    if (selectedTable?.status === 'Occupied' && selectedTable.active_order_id) {
+      setIsLoadingActiveSession(true);
+      getRelatedOrdersForBillAction(selectedTable.active_order_id)
+        .then(res => {
+          if (res.success && res.orders) {
+            setActiveSessionOrders(res.orders as Order[]);
+          } else {
+            setActiveSessionOrders([]);
+          }
+        })
+        .catch(() => setActiveSessionOrders([]))
+        .finally(() => setIsLoadingActiveSession(false));
+    } else {
+      setActiveSessionOrders([]);
+    }
+  }, [selectedTable]);
 
   // Handlers
+  const handleRemoveItem = async (item: any, orderId: number) => {
+    if (!window.confirm(`Are you sure you want to remove '${item.name}' from this order ticket?`)) {
+      return;
+    }
+
+    startTransition(async () => {
+      toast(`Removing '${item.name}'...`, 'info');
+      const res = await removeOrderItemAction(item.id, orderId);
+      if (res.error) {
+        toast(res.error, 'error');
+      } else {
+        toast(`'${item.name}' removed from order ticket.`, 'success');
+        if (selectedTable?.active_order_id) {
+          const refreshed = await getRelatedOrdersForBillAction(selectedTable.active_order_id);
+          if (refreshed.success && refreshed.orders) {
+            setActiveSessionOrders(refreshed.orders as Order[]);
+          } else {
+            setActiveSessionOrders([]);
+          }
+        }
+        const updatedTables = await getTables();
+        setTables(updatedTables);
+      }
+    });
+  };
+
   const handleOpenAddModal = () => {
     setEditingTable(null);
     setTableNumberInput('');
@@ -203,7 +356,7 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
     }
 
     startTransition(async () => {
-      const res = await moveTableAction(selectedTable.active_order_id, targetTableNum);
+      const res = await moveTableAction(selectedTable.active_order_id!, targetTableNum);
       if (res.error) {
         toast(res.error, 'error');
       } else {
@@ -339,58 +492,131 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
     if (targetTable.status === 'Dirty') {
       setSelectedTable(targetTable);
       setIsDetailsModalOpen(true);
+    } else if (targetTable.status === 'Available') {
+      setStartTableTarget(targetTable);
+      setIsStartTableModalOpen(true);
     } else {
       router.push(`/orders?table=${targetTable.table_number}`);
     }
   };
 
+  const runningTablesList = useMemo(() => {
+    return tables.filter(t => t.status === 'Occupied');
+  }, [tables]);
+
   return (
-    <div className="flex-1 p-6 md:p-8 flex flex-col gap-6 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
-        <div>
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">Tables &amp; Occupancy</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">Monitor seating layouts, manage dirty tables, and route dine-in orders.</p>
+    <div className="flex-1 flex flex-col min-h-screen bg-[#FDF9F5] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 font-sans select-none">
+      {/* TERRACOTTA HEADER BAR MATCHING IMAGE 1 */}
+      <header className="bg-[#8B3A36] text-white px-5 py-3.5 flex items-center justify-between shadow-md sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </Link>
+          <h1 className="text-base sm:text-lg md:text-xl font-bold tracking-tight">
+            Sittings - Tables - Offline (Sync)
+          </h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {isMergeMode ? (
-            <>
-              <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-300 px-3 py-2 rounded-xl flex items-center gap-1.5 border border-dashed border-zinc-350 dark:border-zinc-700 font-semibold">
-                <Link2 className="w-3.5 h-3.5 text-zinc-400" />
-                Selected: {selectedMergeIds.length} tables
-              </span>
-              <Button onClick={handleMergeSubmit} disabled={selectedMergeIds.length < 2} className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white" isLoading={isPending}>
-                <Check className="w-4 h-4 mr-1.5" /> Confirm Merge
-              </Button>
-              <Button onClick={() => { setIsMergeMode(false); setSelectedMergeIds([]); }} variant="outline" className="text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-205">
-                Cancel
-              </Button>
-            </>
-          ) : isManageMode ? (
-            <>
-              <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 px-3 py-2 rounded-xl flex items-center gap-1.5 border border-dashed border-zinc-300 dark:border-zinc-700 font-bold">
-                <Settings className="w-3.5 h-3.5 animate-spin-slow text-zinc-450" />
-                Table Management Active
-              </span>
-              <Button onClick={handleOpenAddModal} className="text-xs font-semibold">
-                <Plus className="w-4 h-4 mr-1.5" /> Add New Table
-              </Button>
-              <Button onClick={() => setIsManageMode(false)} variant="outline" className="text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200">
-                Exit Management
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button onClick={() => setIsManageMode(true)} variant="outline" className="text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200">
-                <Settings className="w-4 h-4 mr-1.5 text-zinc-400" /> Manage Layout
-              </Button>
-              <Button onClick={() => setIsMergeMode(true)} variant="outline" className="text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200">
-                <Link2 className="w-4 h-4 mr-1.5 text-zinc-400" /> Merge Tables
-              </Button>
-            </>
-          )}
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => window.location.reload()}
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+            title="Sync / Refresh Tables"
+          >
+            <RefreshCw className="w-5 h-5 text-white" />
+          </button>
+
+          <button
+            onClick={() => setIsRunningModalOpen(true)}
+            className="bg-[#2196F3] hover:bg-blue-600 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+          >
+            Running Tables
+          </button>
+
+          <div className="relative">
+            <button
+              onClick={() => setIsHeaderMenuOpen(prev => !prev)}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title="Toggle Menu Options"
+            >
+              <Menu className="w-6 h-6 text-white" />
+            </button>
+
+            {isHeaderMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md border border-zinc-200/80 dark:border-zinc-800 rounded-2xl shadow-xl z-50 overflow-hidden py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-200 animate-in fade-in zoom-in-95 duration-100">
+                <button
+                  onClick={handleOpenRecentOrders}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
+                >
+                  <Receipt className="w-4 h-4 text-[#8B3A36]" />
+                  <span>Recent Orders</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsHeaderMenuOpen(false);
+                    setIsManageMode(prev => !prev);
+                    toast(isManageMode ? 'Table management mode disabled' : 'Table management mode enabled', 'info');
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
+                >
+                  <Users className="w-4 h-4 text-blue-600" />
+                  <span>Table Managements</span>
+                </button>
+
+                <button
+                  onClick={handleOpenItemWiseModal}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
+                >
+                  <Utensils className="w-4 h-4 text-emerald-600" />
+                  <span>Item Wise Count</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsHeaderMenuOpen(false);
+                    setIsLayoutSettingsModalOpen(true);
+                  }}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2.5 transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-purple-600" />
+                  <span>Layout Settings</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* COLOR LEGEND BAR MATCHING IMAGE 1 */}
+      <div className="bg-[#FDF9F5] dark:bg-zinc-950 px-5 py-2.5 flex items-center justify-center gap-4 sm:gap-6 border-b border-zinc-200/60 dark:border-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 overflow-x-auto">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-zinc-300 dark:bg-zinc-600" />
+          <span>Blank Table</span>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-[#2196F3]" />
+          <span>Running Table</span>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+          <span>Table</span>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+          <span>Paid Table</span>
         </div>
       </div>
+
+      <div className="flex-1 p-4 md:p-6 flex flex-col gap-6 max-w-6xl mx-auto w-full">
+
 
       {/* KPI Widgets grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -461,7 +687,7 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
         </div>
       </div>
 
-      {/* Table Cards Grid */}
+      {/* Table Cards Grid - 3 COLUMNS MATCHING IMAGE 1 */}
       {filteredTables.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-400 border border-dashed rounded-2xl">
           <HelpCircle className="w-10 h-10 mb-2 stroke-[1.5]" />
@@ -469,7 +695,7 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
           <p className="text-[10px] mt-0.5">Try adjusting your search criteria or register a new table layout.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid gap-3.5 sm:gap-5" style={{ gridTemplateColumns: `repeat(${tablesPerRow}, minmax(0, 1fr))` }}>
           {filteredTables.map((table) => {
             const isAvailable = table.status === 'Available';
             const isOccupied = table.status === 'Occupied';
@@ -677,6 +903,7 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
           })}
         </div>
       )}
+      </div>
 
       {/* CREATE & EDIT DIALOG */}
       <Dialog
@@ -710,7 +937,7 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
         </form>
       </Dialog>
 
-      {/* TABLE DETAILS DIALOG */}
+      {/* TABLE DETAILS DIALOG MATCHING IMAGE 1 FOR OCCUPIED TABLES */}
       <Dialog
         isOpen={isDetailsModalOpen}
         onClose={() => {
@@ -718,207 +945,239 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
           setIsSplitting(false);
           setSplitChildSeats(1);
         }}
-        title={`Table details: ${selectedTable?.table_number}`}
+        title=""
       >
         {selectedTable && (
-          <div className="flex flex-col gap-5">
-            {/* Status overview */}
-            <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-950/50 p-4 border rounded-2xl">
-              <div>
-                <p className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Current Status</p>
-                <p className={`text-md font-extrabold mt-0.5 ${
-                  selectedTable.status === 'Available' ? 'text-emerald-600' : ''
-                } ${
-                  selectedTable.status === 'Occupied' ? 'text-blue-600' : ''
-                } ${
-                  selectedTable.status === 'Dirty' ? 'text-amber-600' : ''
-                }`}>
-                  {selectedTable.status}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {selectedTable.status === 'Available' && (
-                  <Button 
-                    onClick={() => handleToggleStatus(selectedTable, 'Dirty')} 
-                    variant="outline" 
-                    className="text-xs bg-white dark:bg-zinc-900 border border-zinc-200 text-amber-600 hover:bg-amber-50"
-                  >
-                    Mark Dirty
-                  </Button>
-                )}
-                {selectedTable.status === 'Dirty' && (
-                  <Button 
-                    onClick={() => handleToggleStatus(selectedTable, 'Available')}
-                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                  >
-                    Clean Table
-                  </Button>
-                )}
-              </div>
-            </div>
+          <div className="-m-6 flex flex-col overflow-hidden rounded-2xl">
+            {selectedTable.status === 'Occupied' ? (
+              <>
+                {/* Modal Header Bar - Terracotta #8B3A36 */}
+                <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-extrabold text-xs">
+                      {selectedTable.table_number}
+                    </div>
+                    <h2 className="text-sm font-bold tracking-tight">
+                      Table {selectedTable.table_number}
+                    </h2>
+                  </div>
 
-            {/* Capacity stats */}
-            <div className="flex flex-col gap-1.5 pl-1 text-xs">
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Information</span>
-              <p className="text-zinc-800 dark:text-zinc-200 font-semibold">Seating limit: <span className="font-extrabold">{selectedTable.capacity} guests</span></p>
-            </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setIsDetailsModalOpen(false);
+                        handleOpenSwapModal(selectedTable);
+                      }}
+                      className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] font-semibold flex items-center gap-1 transition-colors text-white"
+                      title="Group / Swap Table"
+                    >
+                      <Settings className="w-3 h-3" /> Group
+                    </button>
 
-            {/* Active order info */}
-            {selectedTable.status === 'Occupied' && (
-              <div className="border-t border-zinc-150 dark:border-zinc-800/80 pt-4 flex flex-col gap-4">
-                <div className="flex flex-col gap-3">
-                  <span className="text-[10px] font-bold text-zinc-450 uppercase tracking-widest pl-1">Active Dining Session</span>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 bg-zinc-50/50 dark:bg-zinc-950/20 p-4 border border-zinc-150 dark:border-zinc-850 rounded-2xl">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-zinc-400 tracking-wider">Customer</span>
-                      <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200 truncate">{selectedTable.customer_name || 'Walk-In'}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-zinc-400 tracking-wider">Billing Sum</span>
-                      <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{formatCurrency(selectedTable.grand_total || 0, currencyCode)}</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-zinc-400 tracking-wider">Elapsed Time</span>
-                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{selectedTable.elapsed_minutes || 0} minutes</span>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[9px] uppercase font-bold text-zinc-400 tracking-wider">Ticket Reference</span>
-                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Order #{selectedTable.active_order_id}</span>
-                    </div>
+                    <button
+                      onClick={() => setIsDetailsModalOpen(false)}
+                      className="p-1 rounded-lg hover:bg-white/10 transition-colors text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3.5 mt-2">
-                  <Link href={`/orders?table=${selectedTable.table_number}`} className="w-full">
-                    <Button variant="outline" className="w-full text-xs font-bold bg-white dark:bg-zinc-900 border border-zinc-200">
-                      Add Items / Menu
-                    </Button>
-                  </Link>
-                  <Link href={`/billing?orderId=${selectedTable.active_order_id}`} className="w-full">
-                    <Button className="w-full text-xs font-extrabold">
-                      Checkout / Pay Bill
-                    </Button>
-                  </Link>
-                </div>
-                
-                <Button 
-                  onClick={() => handleOpenSwapModal(selectedTable)} 
-                  variant="outline" 
-                  className="w-full py-2.5 text-xs font-bold bg-white dark:bg-zinc-900 text-zinc-700 border border-zinc-200 flex items-center justify-center gap-1.5"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5 text-zinc-400" /> Transfer / Swap Table
-                </Button>
-              </div>
-            )}
+                {/* Modal Body - Items List */}
+                <div className="p-4 bg-[#FDF9F5] dark:bg-zinc-950 flex flex-col gap-3 min-h-[220px] max-h-[360px] overflow-y-auto">
+                  {isLoadingActiveSession ? (
+                    <div className="flex items-center justify-center py-12 text-zinc-400">
+                      <span className="text-xs font-semibold animate-pulse">Loading active order...</span>
+                    </div>
+                  ) : activeSessionOrders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-zinc-400 text-center">
+                      <Utensils className="w-8 h-8 mb-2 stroke-[1.5]" />
+                      <p className="text-xs font-bold text-zinc-650 dark:text-zinc-350">No active items on this table</p>
+                      <Link href={`/orders?table=${selectedTable.table_number}`} className="mt-2">
+                        <button className="text-xs text-sky-600 font-bold hover:underline">+ Add Items from Menu</button>
+                      </Link>
+                    </div>
+                  ) : (
+                    activeSessionOrders.map((order, orderIdx) => (
+                      <div
+                        key={order.id || orderIdx}
+                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-3 sm:p-4 flex flex-col gap-3 shadow-xs"
+                      >
+                        {/* KOT Group Header Banner */}
+                        <div className="flex justify-between items-center bg-[#8B3A36]/10 dark:bg-[#8B3A36]/20 border border-[#8B3A36]/30 px-3 py-2 rounded-xl text-xs font-bold text-[#8B3A36] dark:text-rose-300">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-[#8B3A36] text-white px-2.5 py-0.5 rounded-md text-[11px] font-extrabold">
+                              KOT #{order.token_no || order.id}
+                            </span>
+                            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-semibold flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          </div>
 
-            {/* Vacant / Available prompt */}
-            {selectedTable.status === 'Available' && (
-              <div className="border-t border-zinc-150 dark:border-zinc-800/80 pt-4 flex flex-col gap-4">
-                <Link href={`/orders?table=${selectedTable.table_number}`} className="w-full">
-                  <Button className="w-full py-3.5 text-xs font-extrabold flex items-center justify-center gap-2">
-                    <Utensils className="w-4 h-4" /> Start New Dine-In Order
-                  </Button>
-                </Link>
-              </div>
-            )}
+                          {/* KOT Actions: View KOT */}
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setSelectedRecentOrderView(order)}
+                              className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[10px] flex items-center gap-1 transition-colors shadow-xs"
+                              title="View KOT Slip Details"
+                            >
+                              <Eye className="w-3 h-3" />
+                              View KOT
+                            </button>
+                          </div>
+                        </div>
 
-            {/* Merge settings unmerge button */}
-            {selectedTable.is_merge_primary && (
-              <div className="border-t border-zinc-150 dark:border-zinc-800/80 pt-4 flex flex-col gap-2">
-                <span className="text-[10px] font-bold text-zinc-450 uppercase tracking-widest pl-1">Merge Settings</span>
-                <Button
-                  onClick={() => handleUnmergeSubmit(selectedTable.id)}
-                  variant="outline"
-                  className="w-full py-2.5 text-xs font-bold bg-white dark:bg-zinc-900 text-red-650 hover:bg-red-50 dark:hover:bg-red-950/20 border border-zinc-200 flex items-center justify-center gap-1.5"
-                  disabled={selectedTable.status === 'Occupied' || isPending}
-                  isLoading={isPending}
-                >
-                  <Unlink2 className="w-3.5 h-3.5 text-red-500" /> Split / Unmerge Tables
-                </Button>
-                {selectedTable.status === 'Occupied' && (
-                  <p className="text-[10px] text-zinc-400 italic text-center">Cannot split tables while group has active orders.</p>
-                )}
-              </div>
-            )}
+                        {/* Items under this KOT */}
+                        <div className="flex flex-col gap-2">
+                          {(order.items || []).map((item: any, idx: number) => (
+                            <div
+                              key={idx}
+                              className="bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200/80 dark:border-zinc-700/80 rounded-xl p-3 flex items-center justify-between shadow-xs"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-7 h-7 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border border-rose-200/60 dark:border-rose-900/40 flex items-center justify-center font-extrabold text-xs shrink-0">
+                                  {item.quantity}
+                                </div>
 
-            {/* Split / Share table settings */}
-            {!selectedTable.is_merge_primary && !selectedTable.is_merge_child && (
-              <div className="border-t border-zinc-150 dark:border-zinc-800/80 pt-4 flex flex-col gap-2">
-                <span className="text-[10px] font-bold text-zinc-450 uppercase tracking-widest pl-1">Multi-Party Sharing</span>
-                {selectedTable.is_split_primary || selectedTable.is_split_child ? (
-                  <Button
-                    onClick={() => handleRejoinSplit(selectedTable)}
-                    variant="outline"
-                    className="w-full py-2.5 text-xs font-bold bg-white dark:bg-zinc-900 text-amber-650 hover:bg-amber-50 dark:hover:bg-amber-950/20 border border-zinc-200 flex items-center justify-center gap-1.5"
-                    isLoading={isPending}
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5 text-amber-500" /> Rejoin Shared Table
-                  </Button>
-                ) : (
-                  <>
-                    {isSplitting ? (
-                      <div className="flex flex-col gap-2 p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-150 dark:border-zinc-800">
-                        <span className="text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-widest pl-1">
-                          Seats for shared table B:
-                        </span>
-                        <div className="flex gap-2 items-center">
-                          <select
-                            value={splitChildSeats}
-                            onChange={(e) => setSplitChildSeats(Number(e.target.value))}
-                            className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-205 dark:border-zinc-800 rounded-xl text-xs focus:outline-none"
-                          >
-                            {Array.from(
-                              { length: (selectedTable.original_capacity || selectedTable.capacity) - 1 },
-                              (_, i) => i + 1
-                            ).map((val) => (
-                              <option key={val} value={val}>
-                                {val} seat{val > 1 ? 's' : ''} (Remaining A: {(selectedTable.original_capacity || selectedTable.capacity) - val})
-                              </option>
-                            ))}
-                          </select>
-                          <Button
-                            onClick={() => handleSplitSharing(selectedTable, splitChildSeats)}
-                            className="px-3.5 py-2 text-xs font-bold bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-950 rounded-xl shrink-0"
-                            isLoading={isPending}
-                          >
-                            Split
-                          </Button>
-                          <Button
-                            onClick={() => setIsSplitting(false)}
-                            variant="outline"
-                            className="px-3 py-2 text-xs font-bold rounded-xl border border-zinc-250 bg-white dark:bg-zinc-900 shrink-0"
-                          >
-                            Cancel
-                          </Button>
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
+                                    {item.name}
+                                  </span>
+                                  <span className="text-[11px] text-zinc-400 font-semibold">
+                                    {formatCurrency(Number(item.price), currencyCode)}
+                                  </span>
+                                  {item.notes && (
+                                    <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex items-center gap-1 mt-0.5">
+                                      🏷️ {item.notes}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  defaultChecked
+                                  className="w-4 h-4 rounded border-zinc-300 accent-[#8B3A36] cursor-pointer"
+                                />
+
+                                <Link href={`/orders?table=${selectedTable.table_number}`}>
+                                  <button className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded text-sky-600">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                </Link>
+
+                                <button
+                                  onClick={() => handleRemoveItem(item, order.id)}
+                                  className="p-1 hover:bg-rose-100 dark:hover:bg-rose-950/40 rounded text-rose-600 transition-colors"
+                                  title="Remove item from order ticket"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ) : (
-                      <>
-                        <Button
-                          onClick={() => {
-                            const cap = selectedTable.original_capacity || selectedTable.capacity;
-                            if (cap < 2) {
-                              toast('Table must have at least 2 seats to be split.', 'error');
-                              return;
-                            }
-                            setIsSplitting(true);
-                            setSplitChildSeats(Math.max(1, Math.floor(cap / 2)));
-                          }}
-                          variant="outline"
-                          className="w-full py-2.5 text-xs font-bold bg-white dark:bg-zinc-900 text-blue-650 hover:bg-blue-50 dark:hover:bg-blue-950/20 border border-zinc-200 flex items-center justify-center gap-1.5"
-                          disabled={selectedTable.status === 'Dirty' || isPending}
-                          isLoading={isPending}
-                        >
-                          <ArrowRightLeft className="w-3.5 h-3.5 text-blue-500" /> Split Table (Share Seating)
-                        </Button>
-                        {selectedTable.status === 'Occupied' && (
-                          <p className="text-[9px] text-zinc-400 italic text-center">Note: The active order will be moved to section A.</p>
-                        )}
-                      </>
+                    ))
+                  )}
+                </div>
+
+                {/* Subtotal & Discount Row */}
+                <div className="p-4 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-xs text-zinc-500">
+                    <span>Subtotal</span>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      {formatCurrency(activeSessionTotals.subtotal, currencyCode)}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs">
+                    <button
+                      onClick={() => toast('Discount option available at Checkout.', 'info')}
+                      className="text-sky-600 font-bold hover:underline text-xs"
+                    >
+                      + Add Discount
+                    </button>
+                  </div>
+
+                  <div className="flex justify-between items-center text-sm font-bold text-zinc-900 dark:text-zinc-100 border-t border-zinc-100 dark:border-zinc-800 pt-2 mt-1">
+                    <span>Total</span>
+                    <span>{formatCurrency(activeSessionTotals.total, currencyCode)}</span>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6">
+                  <button
+                    onClick={() => setIsDetailsModalOpen(false)}
+                    className="py-2.5 px-6 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs transition-colors"
+                  >
+                    Close
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (selectedTable.active_order_id) {
+                        toast('Checkout completed.', 'success');
+                        setTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, status: 'Dirty', active_order_id: undefined, grand_total: 0 } : t));
+                        const resStatus = await setTableStatusAction(selectedTable.id, 'Dirty');
+                        if (resStatus.error) {
+                          toast(resStatus.error, 'error');
+                        }
+                        setIsDetailsModalOpen(false);
+                        toast(`Table ${selectedTable.table_number} session ended and marked for cleaning (Dirty).`, 'success');
+                        const updated = await getTables();
+                        setTables(updated);
+                      }
+                    }}
+                    className="py-2.5 px-6 rounded-xl bg-[#4CAF50] hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                  >
+                    Checkout
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="p-6 flex flex-col gap-5">
+                <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-950/50 p-4 border rounded-2xl">
+                  <div>
+                    <p className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Current Status</p>
+                    <p className={`text-md font-extrabold mt-0.5 ${
+                      selectedTable.status === 'Available' ? 'text-emerald-600' : 'text-amber-600'
+                    }`}>
+                      {selectedTable.status}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {selectedTable.status === 'Available' && (
+                      <Button 
+                        onClick={() => handleToggleStatus(selectedTable, 'Dirty')} 
+                        variant="outline" 
+                        className="text-xs bg-white dark:bg-zinc-900 border border-zinc-200 text-amber-600 hover:bg-amber-50"
+                      >
+                        Mark Dirty
+                      </Button>
                     )}
-                  </>
-                )}
+                    {selectedTable.status === 'Dirty' && (
+                      <Button 
+                        onClick={() => handleToggleStatus(selectedTable, 'Available')}
+                        className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                      >
+                        Clean Table
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setIsDetailsModalOpen(false)}
+                    className="py-2 px-6 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -963,6 +1222,666 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
             </div>
           </form>
         )}
+      </Dialog>
+
+      {/* RUNNING TABLES MODAL POPUP MATCHING IMAGE 2 */}
+      <Dialog
+        isOpen={isRunningModalOpen}
+        onClose={() => setIsRunningModalOpen(false)}
+        title=""
+      >
+        <div className="-m-6 flex flex-col overflow-hidden rounded-2xl">
+          {/* Modal Header */}
+          <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between">
+            <h2 className="text-sm sm:text-base font-bold tracking-tight">
+              Running Tables- Offline (Sync)
+            </h2>
+            <button
+              onClick={() => window.location.reload()}
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw className="w-4 h-4 text-white" />
+            </button>
+          </div>
+
+          {/* Modal Body */}
+          <div className="p-4 sm:p-5 flex flex-col gap-3 min-h-[160px] max-h-[380px] overflow-y-auto bg-[#FDF9F5] dark:bg-zinc-900">
+            {runningTablesList.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center text-zinc-400">
+                <Utensils className="w-8 h-8 mb-2 stroke-[1.5]" />
+                <p className="text-xs font-bold text-zinc-650 dark:text-zinc-350">No Running Tables</p>
+                <p className="text-[10px] text-zinc-400 mt-0.5">All tables are currently available or clean.</p>
+              </div>
+            ) : (
+              runningTablesList.map((table) => (
+                <div
+                  key={table.id}
+                  className="bg-white dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/80 rounded-2xl p-4 flex items-center justify-between shadow-xs"
+                >
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100">
+                      Table {table.table_number} Seats: Full
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 font-medium">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Time : 00:00:51</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setIsRunningModalOpen(false);
+                        setSelectedTable(table);
+                        setIsDetailsModalOpen(true);
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/40 text-sky-600 dark:text-sky-400 transition-colors"
+                      title="View Ticket / KOT"
+                    >
+                      <List className="w-5 h-5" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsRunningModalOpen(false);
+                        handleOpenSwapModal(table);
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 transition-colors"
+                      title="Move Table"
+                    >
+                      <ArrowRightLeft className="w-5 h-5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteTable(table, e);
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 transition-colors"
+                      title="Delete / Cancel Table"
+                    >
+                      <Trash2 className="w-5 h-5 text-rose-600" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Modal Footer */}
+          <div className="p-4 bg-zinc-100/80 dark:bg-zinc-900 border-t border-zinc-200/80 dark:border-zinc-800 flex justify-center">
+            <button
+              onClick={() => setIsRunningModalOpen(false)}
+              className="py-2 px-10 rounded-full bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-100 font-bold text-xs transition-colors shadow-xs"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* START TABLE DIALOG MATCHING IMAGE 4 */}
+      <Dialog
+        isOpen={isStartTableModalOpen}
+        onClose={() => setIsStartTableModalOpen(false)}
+        title=""
+      >
+        {startTableTarget && (
+          <div className="-m-6 flex flex-col overflow-hidden rounded-2xl">
+            {/* Modal Header Bar */}
+            <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-white">
+                  <Utensils className="w-4 h-4" />
+                </div>
+                <div className="flex flex-col">
+                  <h2 className="text-sm font-bold tracking-tight">
+                    Table {startTableTarget.table_number}
+                  </h2>
+                  <span className="text-[11px] opacity-80">
+                    Table {startTableTarget.table_number} • Full Table
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsStartTableModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 bg-white dark:bg-zinc-900 flex flex-col gap-4">
+              <div className="bg-[#E8F5E9] dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-full bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 flex items-center justify-center font-bold text-sm">
+                    {startTableTarget.table_number}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-sm text-zinc-900 dark:text-zinc-100">
+                      Table {startTableTarget.table_number}
+                    </span>
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                      Capacity: {startTableTarget.capacity} • Full Table
+                    </span>
+                  </div>
+                </div>
+
+                <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-6">
+              <button
+                onClick={() => setIsStartTableModalOpen(false)}
+                className="py-2.5 px-6 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs transition-colors"
+              >
+                Close
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsStartTableModalOpen(false);
+                  router.push(`/orders?table=${startTableTarget.table_number}`);
+                }}
+                className="py-2.5 px-6 rounded-xl bg-[#4CAF50] hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Start
+              </button>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* RECENT ORDERS MODAL MATCHING SCREENSHOT 1 */}
+      <Dialog
+        isOpen={isRecentOrdersModalOpen}
+        onClose={() => setIsRecentOrdersModalOpen(false)}
+        title=""
+      >
+        <div className="-m-6 flex flex-col overflow-hidden rounded-2xl max-w-lg w-full">
+          {/* Terracotta Header Banner */}
+          <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                <Receipt className="w-4 h-4" />
+              </div>
+              <h2 className="text-sm font-bold tracking-tight">
+                Recent Orders - Offline (Sync)
+              </h2>
+            </div>
+
+            <button
+              onClick={() => setIsRecentOrdersModalOpen(false)}
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+
+          {/* Search Input Bar */}
+          <div className="p-4 bg-[#F5F2F0] dark:bg-zinc-950 flex items-center gap-2 border-b border-zinc-200/60 dark:border-zinc-800">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Search by Order No"
+                value={recentOrdersSearchTerm}
+                onChange={(e) => setRecentOrdersSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#8B3A36]"
+              />
+            </div>
+
+            <button
+              onClick={() => handleOpenRecentOrders()}
+              className="bg-[#8B3A36] hover:bg-[#742F2C] text-white p-2.5 rounded-xl transition-colors shrink-0 shadow-xs"
+              title="Search / Refresh"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Order Card List Container */}
+          <div className="p-4 sm:p-5 flex flex-col gap-4 min-h-[260px] max-h-[440px] overflow-y-auto bg-[#FDF9F5] dark:bg-zinc-900">
+            {isLoadingRecentOrders ? (
+              <div className="flex items-center justify-center py-16 text-zinc-400">
+                <span className="text-xs font-semibold animate-pulse">Loading recent orders...</span>
+              </div>
+            ) : filteredRecentOrders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-zinc-400 text-center">
+                <Receipt className="w-10 h-10 mb-2 stroke-[1.2]" />
+                <p className="text-xs font-bold text-zinc-650 dark:text-zinc-350">No Recent Orders Found</p>
+              </div>
+            ) : (
+              filteredRecentOrders.map((order) => {
+                const itemsSummary = (order.items || []).map((it: any) => `${it.name} (x${(it.quantity || 1).toFixed(1)}) - ₹${(Number(it.price) * (it.quantity || 1)).toFixed(2)}`);
+                
+                return (
+                  <div
+                    key={order.id}
+                    className="bg-white dark:bg-zinc-800/90 border border-zinc-200/80 dark:border-zinc-700/80 rounded-2xl p-4 flex flex-col gap-2.5 shadow-xs"
+                  >
+                    {/* Top Header of Card */}
+                    <div className="flex justify-between items-start">
+                      <div className="flex flex-col">
+                        <h3 className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                          <span>Order No: 2627-{String(order.id).padStart(5, '0')}</span>
+                          <span>Table: {order.table_number || 'N/A'}</span>
+                        </h3>
+                        <span className="text-[11px] text-zinc-400 font-medium">
+                          Created By: {order.customer_name || 'Only Dhosa'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-[10px] text-zinc-400 font-medium">
+                          {new Date(order.created_at).toLocaleDateString('en-GB')} {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                        <span className="font-bold text-xs sm:text-sm text-[#8B3A36] dark:text-rose-400">
+                          Total: {formatCurrency(order.grand_total, currencyCode)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Inset Item Breakdown Box matching screenshot 1 */}
+                    <div className="bg-[#F8F5F2] dark:bg-zinc-900/90 border border-zinc-150 dark:border-zinc-800 rounded-xl p-3 flex flex-col gap-1 text-[11px] text-zinc-650 dark:text-zinc-300 font-medium">
+                      {itemsSummary.length > 0 ? (
+                        itemsSummary.map((itemText: string, i: number) => (
+                          <div key={i} className="truncate">
+                            {itemText}
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-zinc-400 italic">No items attached</span>
+                      )}
+                    </div>
+
+                    {/* Card Action Buttons at bottom left */}
+                    <div className="flex items-center gap-2 pt-1">
+
+
+                      <button
+                        onClick={() => setSelectedRecentOrderView(order)}
+                        className="px-3.5 py-1 rounded-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-700 dark:text-zinc-200 font-semibold text-[11px] flex items-center gap-1.5 transition-colors border border-zinc-200/60"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-zinc-500" />
+                        View
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="p-3.5 bg-zinc-100/90 dark:bg-zinc-900 border-t border-zinc-200/80 dark:border-zinc-800 flex justify-end px-5">
+            <button
+              onClick={() => setIsRecentOrdersModalOpen(false)}
+              className="py-2 px-5 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-250 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs flex items-center gap-1 hover:bg-zinc-50 transition-colors shadow-xs"
+            >
+              <X className="w-3.5 h-3.5" /> Close
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* DIGITAL BILL PREVIEW MODAL MATCHING SCREENSHOT 1 */}
+      <Dialog
+        isOpen={!!selectedRecentOrderView}
+        onClose={() => setSelectedRecentOrderView(null)}
+        title=""
+      >
+        {selectedRecentOrderView && (
+          <div className="-m-6 flex flex-col items-center bg-zinc-950/40 p-4 sm:p-6 select-none">
+            <div className="bg-white text-zinc-900 rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl flex flex-col items-center border border-zinc-200">
+              {/* Header / Logo */}
+              <div className="flex flex-col items-center text-center gap-1">
+                <div className="flex items-center justify-center gap-1.5 font-extrabold text-rose-600 text-xl tracking-tight">
+                  <span className="w-6 h-6 rounded-full bg-rose-600 text-white flex items-center justify-center text-xs">🍕</span>
+                  <span>Only Dhosa</span>
+                </div>
+                <p className="text-[10px] text-zinc-600 font-semibold max-w-[260px] leading-tight mt-1">
+                  Maruti Chowk, Tapovam Mahadev Mandir, 60 feet main road, opp. Anupam Heights and Bajrang Dairy bestakar, Vavdi, Rajkot, Gujarat. 360004
+                </p>
+                <div className="text-xs font-bold text-zinc-900 mt-2">
+                  Invoice No: 2627-{String(selectedRecentOrderView.id).padStart(5, '0')}
+                </div>
+                <div className="text-[11px] font-semibold text-zinc-700">
+                  Date: {new Date(selectedRecentOrderView.created_at).toLocaleDateString('en-GB')} Time: {new Date(selectedRecentOrderView.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </div>
+              </div>
+
+              {/* Table of Items matching screenshot 1 */}
+              <div className="w-full border-t border-zinc-300 mt-4 pt-3">
+                <div className="grid grid-cols-12 text-[11px] font-extrabold text-zinc-900 border-b border-zinc-300 pb-1.5 mb-2">
+                  <span className="col-span-6">Name</span>
+                  <span className="col-span-2 text-center">Qty</span>
+                  <span className="col-span-2 text-right">Price</span>
+                  <span className="col-span-2 text-right">Total</span>
+                </div>
+
+                <div className="flex flex-col gap-2 max-h-[220px] overflow-y-auto text-[11px] font-medium text-zinc-800">
+                  {(selectedRecentOrderView.items || []).map((it: any, i: number) => {
+                    const qty = it.quantity || 1;
+                    const price = Number(it.price) || 0;
+                    const lineTotal = Number(it.total_price) || (qty * price);
+                    return (
+                      <div key={i} className="grid grid-cols-12 items-baseline">
+                        <span className="col-span-6 font-bold leading-snug pr-1 truncate">{it.name}</span>
+                        <span className="col-span-2 text-center">{qty}</span>
+                        <span className="col-span-2 text-right">{price.toFixed(1)}</span>
+                        <span className="col-span-2 text-right">{lineTotal.toFixed(2)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Summary & Totals */}
+              <div className="w-full border-t border-zinc-300 mt-4 pt-3 flex flex-col gap-1.5">
+                <div className="flex justify-between items-center text-xs font-bold text-zinc-900">
+                  <span>Total Items</span>
+                  <span>{(selectedRecentOrderView.items || []).reduce((sum: number, it: any) => sum + (it.quantity || 1), 0)}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-base font-extrabold text-zinc-950 border-t border-zinc-400 pt-2 mt-1">
+                  <span>Total</span>
+                  <span>{selectedRecentOrderView.grand_total ? selectedRecentOrderView.grand_total.toFixed(2) : '0.00'}</span>
+                </div>
+              </div>
+
+              {/* Thank you & QR Code */}
+              <div className="flex flex-col items-center mt-5 gap-1.5">
+                <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-wider">THANK YOU</span>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=POS_INV_2627-${String(selectedRecentOrderView.id).padStart(5, '0')}`}
+                  alt="QR Code"
+                  className="w-20 h-20 object-contain rounded-md"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              </div>
+
+              {/* Close Button at bottom right matching screenshot 1 */}
+              <div className="w-full flex justify-end mt-6">
+                <button
+                  onClick={() => setSelectedRecentOrderView(null)}
+                  className="bg-[#FF4D4D] hover:bg-rose-600 text-white font-bold text-xs px-5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <X className="w-4 h-4" /> Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* ITEM WISE ORDER MODAL MATCHING SCREENSHOT 2 */}
+      <Dialog
+        isOpen={isItemCountModalOpen}
+        onClose={() => setIsItemCountModalOpen(false)}
+        title=""
+      >
+        <div className="-m-6 flex flex-col overflow-hidden rounded-2xl max-w-xl w-full">
+          {/* Header */}
+          <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                <Utensils className="w-4 h-4" />
+              </div>
+              <h2 className="text-sm font-bold tracking-tight">
+                Item Wise Order - Offline (Sync)
+              </h2>
+            </div>
+
+            <button
+              onClick={() => setIsItemCountModalOpen(false)}
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+
+          {/* Top Filters - Date Picker fieldset + Search button + Search Item Input */}
+          <div className="p-4 bg-[#F5F2F0] dark:bg-zinc-950 flex flex-col gap-3 border-b border-zinc-200/60 dark:border-zinc-800">
+            <div className="flex items-center gap-3">
+              {/* Date Fieldset Border Input */}
+              <div className="relative flex-1">
+                <label className="absolute -top-2.5 left-3.5 bg-[#F5F2F0] dark:bg-zinc-950 px-1 text-[10px] font-bold text-indigo-700 dark:text-indigo-400">
+                  Select Date
+                </label>
+                <input
+                  type="date"
+                  value={selectedItemSalesDate}
+                  onChange={(e) => {
+                    setSelectedItemSalesDate(e.target.value);
+                    fetchItemWiseSales(e.target.value);
+                  }}
+                  className="w-full h-10 px-3.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#8B3A36]"
+                />
+              </div>
+
+              {/* Search Button */}
+              <button
+                onClick={() => fetchItemWiseSales(selectedItemSalesDate)}
+                className="bg-[#8B3A36] hover:bg-[#742F2C] text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs shrink-0"
+              >
+                <Search className="w-3.5 h-3.5" /> Search
+              </button>
+            </div>
+
+            {/* Search Item Name Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                type="text"
+                placeholder="Search item name"
+                value={itemSalesSearchTerm}
+                onChange={(e) => setItemSalesSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#8B3A36]"
+              />
+            </div>
+          </div>
+
+          {/* Table of Item Wise Sales matching Screenshot 2 */}
+          <div className="p-4 sm:p-5 flex flex-col min-h-[280px] max-h-[420px] overflow-y-auto bg-[#FDF9F5] dark:bg-zinc-900">
+            <div className="grid grid-cols-12 text-xs font-bold text-zinc-600 dark:text-zinc-400 pb-2 border-b border-zinc-200 dark:border-zinc-800 mb-2">
+              <span className="col-span-6">Item</span>
+              <span className="col-span-2 text-center">Qty</span>
+              <span className="col-span-2 text-right">Price</span>
+              <span className="col-span-2 text-right">Total</span>
+            </div>
+
+            {isLoadingItemSales ? (
+              <div className="flex items-center justify-center py-16 text-zinc-400">
+                <span className="text-xs font-semibold animate-pulse">Loading item sales data...</span>
+              </div>
+            ) : filteredItemWiseSales.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-zinc-400 text-center">
+                <Utensils className="w-8 h-8 mb-2 stroke-[1.2]" />
+                <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400">No Sales Data for {selectedItemSalesDate}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800/60">
+                {filteredItemWiseSales.map((item, idx) => (
+                  <div key={idx} className="grid grid-cols-12 items-center py-2.5 text-xs text-zinc-900 dark:text-zinc-100 font-semibold">
+                    <span className="col-span-6 pr-2 truncate">{item.name}</span>
+                    <span className="col-span-2 text-center text-zinc-600 dark:text-zinc-400">{item.qty.toFixed(2)}</span>
+                    <span className="col-span-2 text-right text-zinc-600 dark:text-zinc-400">{item.price.toFixed(2)}</span>
+                    <span className="col-span-2 text-right font-extrabold text-zinc-900 dark:text-zinc-50">{item.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Footer Action Buttons matching Screenshot 2 */}
+          <div className="p-3.5 bg-zinc-100/90 dark:bg-zinc-900 border-t border-zinc-200/80 dark:border-zinc-800 flex justify-between items-center px-5">
+            <button
+              onClick={() => setIsItemCountModalOpen(false)}
+              className="p-2.5 rounded-xl bg-white dark:bg-zinc-800 border border-zinc-250 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-bold text-xs hover:bg-zinc-50 transition-colors shadow-xs"
+              title="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2">
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(filteredItemWiseSales, null, 2));
+                  toast('Item sales data copied to clipboard.', 'success');
+                }}
+                className="bg-[#8B3A36] hover:bg-[#742F2C] text-white p-2.5 rounded-xl transition-colors shadow-xs"
+                title="Copy Data"
+              >
+                <Receipt className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => {
+                  toast('Share report option active', 'info');
+                }}
+                className="bg-[#4CAF50] hover:bg-emerald-600 text-white p-2.5 rounded-xl transition-colors shadow-xs"
+                title="Share Report"
+              >
+                <Play className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* SITTINGS LAYOUT SETTINGS MODAL MATCHING SCREENSHOTS 1 & 2 */}
+      <Dialog
+        isOpen={isLayoutSettingsModalOpen}
+        onClose={() => setIsLayoutSettingsModalOpen(false)}
+        title=""
+      >
+        <div className="-m-6 flex flex-col overflow-hidden rounded-2xl max-w-md w-full min-h-[380px] bg-[#FDF9F5] dark:bg-zinc-950 select-none">
+          {/* Terracotta Header Banner */}
+          <div className="bg-[#8B3A36] text-white p-4 flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsLayoutSettingsModalOpen(false)}
+                className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+                title="Back"
+              >
+                <ArrowLeft className="w-5 h-5 text-white" />
+              </button>
+              <h2 className="text-sm sm:text-base font-bold tracking-tight">
+                Sittings Layout Settings
+              </h2>
+            </div>
+
+            <button
+              onClick={() => setIsLayoutSettingsModalOpen(false)}
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4 text-white" />
+            </button>
+          </div>
+
+          {/* Tab Strip: THEME | GENERAL */}
+          <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-8 px-6 text-xs font-bold uppercase tracking-wider">
+            <button
+              onClick={() => setLayoutActiveTab('THEME')}
+              className={`py-3.5 border-b-2 transition-colors ${
+                layoutActiveTab === 'THEME'
+                  ? 'border-purple-700 text-purple-700 dark:border-purple-400 dark:text-purple-400 font-extrabold'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+              }`}
+            >
+              THEME
+            </button>
+
+            <button
+              onClick={() => setLayoutActiveTab('GENERAL')}
+              className={`py-3.5 border-b-2 transition-colors ${
+                layoutActiveTab === 'GENERAL'
+                  ? 'border-purple-700 text-purple-700 dark:border-purple-400 dark:text-purple-400 font-extrabold'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+              }`}
+            >
+              GENERAL
+            </button>
+          </div>
+
+          {/* Tab Body */}
+          <div className="flex-1 p-6 flex flex-col gap-6 relative">
+            {layoutActiveTab === 'THEME' ? (
+              /* THEME TAB CONTENT MATCHING SCREENSHOT 1 */
+              <div className="flex items-center justify-between bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-2xl shadow-xs">
+                <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
+                  Per Row Table
+                </span>
+
+                {/* Selector Button & Dropdown Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setIsPerRowDropdownOpen(prev => !prev)}
+                    className="px-4 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-bold text-xs flex items-center gap-2 border border-zinc-250 dark:border-zinc-700"
+                  >
+                    <span>{tablesPerRow}</span>
+                    <span className="text-[10px]">▼</span>
+                  </button>
+
+                  {/* Floating Dropdown Menu matching Screenshot 1 */}
+                  {isPerRowDropdownOpen && (
+                    <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto py-1 text-xs font-semibold">
+                      {[0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((num) => (
+                        <button
+                          key={num}
+                          onClick={() => {
+                            setTablesPerRow(num === 0 ? 3 : num);
+                            setIsPerRowDropdownOpen(false);
+                            toast(`Grid updated to ${num} tables per row`, 'success');
+                          }}
+                          className={`w-full text-left px-4 py-2 hover:bg-purple-50 dark:hover:bg-purple-950/40 ${
+                            tablesPerRow === num
+                              ? 'bg-zinc-200 dark:bg-zinc-800 font-extrabold text-purple-700 dark:text-purple-300'
+                              : 'text-zinc-800 dark:text-zinc-200'
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* GENERAL TAB CONTENT MATCHING SCREENSHOT 2 */
+              <div className="flex items-center justify-between bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-2xl shadow-xs">
+                <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
+                  Session manage By
+                </span>
+
+                <select
+                  value={sessionManageBy}
+                  onChange={(e) => {
+                    const val = e.target.value as 'online' | 'offline';
+                    setSessionManageBy(val);
+                    toast(`Session mode set to ${val}`, 'info');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-250 dark:border-zinc-700 text-xs font-bold text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer"
+                >
+                  <option value="online">online</option>
+                  <option value="offline">offline</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
       </Dialog>
     </div>
   );

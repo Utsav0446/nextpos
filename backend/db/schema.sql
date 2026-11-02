@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS menu_items (
     default_prep VARCHAR(50) DEFAULT 'Regular',
     default_texture VARCHAR(50) DEFAULT 'Regular',
     show_popup BOOLEAN DEFAULT TRUE,
+    custom_options JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS orders (
     remaining_amount DECIMAL(10, 2) DEFAULT 0.00,
     payment_type VARCHAR(50), -- 'Cash', 'UPI', 'Card'
     notes TEXT,
+    token_no INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -128,21 +130,11 @@ CREATE TABLE IF NOT EXISTS restaurant_settings (
     gstin VARCHAR(50),
     gst_percentage DECIMAL(5, 2) DEFAULT 5.00,
     currency VARCHAR(10) DEFAULT 'INR',
-    printer_name VARCHAR(150),
-    print_kot_automatically BOOLEAN DEFAULT TRUE,
     enable_token_number BOOLEAN DEFAULT TRUE,
-    printer_ip VARCHAR(50) DEFAULT '127.0.0.1',
-    printer_port INT DEFAULT 9100,
-    bill_printer_ip VARCHAR(50) DEFAULT '127.0.0.1',
-    bill_printer_port INT DEFAULT 9100,
-    kot_printer_ip VARCHAR(50) DEFAULT '127.0.0.1',
-    kot_printer_port INT DEFAULT 9100,
     enable_gst BOOLEAN DEFAULT TRUE,
     logo_url TEXT,
     receipt_header TEXT,
     receipt_footer TEXT,
-    kot_copies INT DEFAULT 1,
-    paper_width VARCHAR(20) DEFAULT '80mm',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -225,8 +217,8 @@ INSERT INTO users (email, password_hash, role) VALUES
 ON CONFLICT (email) DO NOTHING;
 
 -- Seed Default Restaurant Settings
-INSERT INTO restaurant_settings (id, restaurant_name, address, phone, gstin, gst_percentage, currency, bill_printer_ip, bill_printer_port, kot_printer_ip, kot_printer_port)
-VALUES (1, 'Gastronomy POS', '123 Food Street, Culinary City', '+91 98765 43210', '22AAAAA0000A1Z5', 5.00, 'INR', '127.0.0.1', 9100, '127.0.0.1', 9100)
+INSERT INTO restaurant_settings (id, restaurant_name, address, phone, gstin, gst_percentage, currency)
+VALUES (1, 'Gastronomy POS', '123 Food Street, Culinary City', '+91 98765 43210', '22AAAAA0000A1Z5', 5.00, 'INR')
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed Default Categories
@@ -287,7 +279,7 @@ BEGIN
 
     BEGIN
         IF upper(trim(final_query)) LIKE 'SELECT%' OR upper(final_query) LIKE '%RETURNING%' THEN
-            EXECUTE 'SELECT COALESCE(json_agg(t), ''[]''::jsonb) FROM (' || final_query || ') t' INTO res;
+            EXECUTE 'SELECT COALESCE(json_agg(t)::jsonb, ''[]''::jsonb) FROM (' || final_query || ') t' INTO res;
         ELSE
             EXECUTE final_query;
             res := '[]'::jsonb;

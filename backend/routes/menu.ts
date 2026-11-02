@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getMenuItems, getMenuItemById, createMenuItem, updateMenuItem, deleteMenuItem } from '../queries/menu';
+import { getMenuItems, getMenuItemById, createMenuItem, updateMenuItem, softDeleteMenuItem } from '../queries/menu';
 
 const router = Router();
 
@@ -42,7 +42,7 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const data = await deleteMenuItem(Number(req.params.id));
+    const data = await softDeleteMenuItem(Number(req.params.id));
     res.json({ success: data });
   } catch (error: any) {
     res.status(400).json({ error: error.message });

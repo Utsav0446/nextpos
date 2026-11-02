@@ -48,7 +48,6 @@ export function Navbar({ adminEmail, logoUrl }: NavbarProps) {
     { name: t('dashboard'), href: '/dashboard', icon: LayoutDashboard },
     { name: t('sitting'), href: '/tables', icon: TableProperties },
     { name: t('parcel'), href: '/orders?type=Takeaway', icon: ShoppingBag },
-    { name: t('billing'), href: '/billing', icon: Receipt },
     { name: t('menu'), href: '/menu', icon: UtensilsCrossed },
     { name: t('expenses'), href: '/expenses', icon: Wallet },
     { name: t('reports'), href: '/reports', icon: BarChart3 },

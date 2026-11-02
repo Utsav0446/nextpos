@@ -1,11 +1,8 @@
+import './env'; // This must be the very first import to fix hoisting issues!
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
 import path from 'path';
-
-// Load environment variables from local .env.local
-dotenv.config({ path: path.join(__dirname, '.env.local') });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,6 +30,23 @@ app.use('/api/categories', categoriesRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/orders', ordersRoutes);
 
-app.listen(PORT, () => {
+import { supabase } from './db/index';
+
+
+app.listen(PORT, async () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
+  try {
+    const { error } = await supabase.rpc('exec_sql', {
+      sql: `ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS custom_options JSONB DEFAULT '[]'::jsonb;`
+    });
+    if (!error) {
+      console.log('Migration successful: custom_options ensured.');
+      await supabase.rpc('exec_sql', { sql: `NOTIFY pgrst, 'reload schema';` });
+    }
+  } catch(e) {
+    console.error('Migration failed', e);
+  }
+
+
 });
+

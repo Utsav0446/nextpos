@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { getActiveOrders, getCompletedOrders, getOrderById } from '../queries/orders';
-import { submitOrderAction, settleOrderAction, cancelOrderAction } from '../actions/orders';
+import { getOrders, getOrderById } from '../queries/orders';
+import { createOrderAction, completeOrderAction, deleteOrderAction } from '../actions/orders';
 
 const router = Router();
 
 router.get('/active', async (req, res) => {
   try {
-    const data = await getActiveOrders();
+    const data = await getOrders({ status: 'Pending' });
     res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -15,8 +15,7 @@ router.get('/active', async (req, res) => {
 
 router.get('/completed', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    const data = await getCompletedOrders(startDate as string, endDate as string);
+    const data = await getOrders({ status: 'Completed' });
     res.json(data);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -35,7 +34,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const result = await submitOrderAction(req.body);
+    const result = await createOrderAction(req.body);
     if (result.error) return res.status(400).json(result);
     res.json(result);
   } catch (error: any) {
@@ -45,7 +44,7 @@ router.post('/', async (req, res) => {
 
 router.post('/:id/settle', async (req, res) => {
   try {
-    const result = await settleOrderAction(Number(req.params.id), req.body.paymentType, req.body.discount);
+    const result = await completeOrderAction(Number(req.params.id), req.body.paymentType || 'Cash', req.body.paidAmount, req.body.discount || 0);
     if (result.error) return res.status(400).json(result);
     res.json(result);
   } catch (error: any) {
@@ -55,7 +54,7 @@ router.post('/:id/settle', async (req, res) => {
 
 router.post('/:id/cancel', async (req, res) => {
   try {
-    const result = await cancelOrderAction(Number(req.params.id));
+    const result = await deleteOrderAction(Number(req.params.id));
     if (result.error) return res.status(400).json(result);
     res.json(result);
   } catch (error: any) {

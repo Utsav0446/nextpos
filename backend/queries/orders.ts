@@ -282,6 +282,100 @@ export async function completeOrderAndBill(
   return completedOrder;
 }
 
+export async function completeMultipleOrdersAndBill(
+  ids: number[],
+  paymentType: PaymentType,
+  paidAmount: number,
+  totalDiscount: number = 0
+): Promise<boolean> {
+  if (ids.length === 0) return true;
+
+  // Fetch all orders
+  const { data: orders, error: fetchError } = await supabase
+    .from('orders')
+    .select('*')
+    .in('id', ids)
+    .order('created_at', { ascending: true });
+
+  if (fetchError) throw fetchError;
+  if (!orders || orders.length === 0) {
+    throw new Error('Orders not found');
+  }
+
+  let remainingPaid = paidAmount;
+  let remainingDiscount = totalDiscount;
+
+  // Process each order sequentially
+  for (let i = 0; i < orders.length; i++) {
+    const order = orders[i];
+    const subtotal = Number(order.subtotal);
+    const tax = Number(order.tax);
+    
+    // Allocate discount
+    const allocatableDiscount = Math.min(subtotal + tax, remainingDiscount);
+    remainingDiscount -= allocatableDiscount;
+
+    const newGrandTotal = Math.max(0, subtotal + tax - allocatableDiscount);
+    
+    // Allocate paid amount
+    const allocatablePaid = Math.min(newGrandTotal, remainingPaid);
+    remainingPaid -= allocatablePaid;
+
+    const remainingAmount = Math.max(0, newGrandTotal - allocatablePaid);
+
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({
+        status: 'Completed',
+        payment_type: paymentType,
+        paid_amount: allocatablePaid,
+        discount: allocatableDiscount,
+        grand_total: newGrandTotal,
+        remaining_amount: remainingAmount,
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', order.id);
+
+    if (updateError) throw updateError;
+  }
+
+  // Log Activity
+  await supabase
+    .from('audit_logs')
+    .insert({
+      action: 'COMPLETE_MULTIPLE_ORDERS',
+      details: `Orders [${ids.join(', ')}] completed. Paid: ${paidAmount} via ${paymentType}`,
+    });
+
+  // Table handling (take the first order's table since they should all be the same)
+  const firstOrder = orders[0];
+  if (firstOrder.order_type === 'Dine-In' && firstOrder.table_number) {
+    const { data: tableData, error: tableFetchErr } = await supabase
+      .from('restaurant_tables')
+      .select('id')
+      .ilike('table_number', firstOrder.table_number.trim())
+      .maybeSingle();
+
+    if (!tableFetchErr && tableData) {
+      const tableId = tableData.id;
+      await supabase
+        .from('restaurant_tables')
+        .update({ status: 'Dirty', updated_at: new Date().toISOString() })
+        .eq('id', tableId);
+
+      await supabase
+        .from('restaurant_tables')
+        .update({ status: 'Dirty', updated_at: new Date().toISOString() })
+        .eq('merged_with', tableId);
+    }
+  }
+
+  clearReportsCache();
+  return true;
+}
+
+
 export async function deleteOrder(id: number): Promise<boolean> {
   const { error } = await supabase
     .from('orders')
@@ -310,6 +404,7 @@ export async function getRecentOrdersWithItems(days: number = 7): Promise<Order[
     .from('orders')
     .select('*')
     .gte('created_at', dateLimitStr)
+    .eq('status', 'Completed')
     .order('created_at', { ascending: false });
 
   if (ordersErr) throw ordersErr;

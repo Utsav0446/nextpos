@@ -3,11 +3,12 @@
 import React, { useState } from 'react';
 import { Order, RestaurantSettings } from '@/types';
 import { formatCurrency, formatDate } from '@/utils/format';
-import { printBillAction } from '@/actions/print';
+
+import { getRelatedOrdersForBillAction } from '@/actions/orders';
 import { useToast } from '@/components/ui/Toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { 
-  Printer, 
+
   Eye, 
   X, 
   Calendar, 
@@ -17,7 +18,8 @@ import {
   CheckCircle2, 
   Clock, 
   DollarSign,
-  Search
+  Search,
+  Loader2
 } from 'lucide-react';
 
 interface DashboardRecentOrdersProps {
@@ -29,30 +31,30 @@ export function DashboardRecentOrders({ initialOrders, settings }: DashboardRece
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [isPrinting, setIsPrinting] = useState<number | null>(null);
+  const [relatedOrders, setRelatedOrders] = useState<Order[]>([]);
+  const [isLoadingRelated, setIsLoadingRelated] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState('');
 
-  const handlePrint = async (orderId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsPrinting(orderId);
+
+
+  const handleViewOrder = async (order: Order) => {
+    setSelectedOrder(order);
+    setIsLoadingRelated(true);
+    setRelatedOrders([]);
     try {
-      const res = await printBillAction(orderId);
-      if (res.error) {
-        toast(`Printing failed: ${res.error}`, 'error');
+      const res = await getRelatedOrdersForBillAction(order.id);
+      if (res.error || !res.orders) {
+        toast('Failed to load related orders.', 'error');
+        setRelatedOrders([order]);
       } else {
-        toast('Thermal print job fired successfully.', 'success');
+        setRelatedOrders(res.orders as Order[]);
       }
     } catch (err) {
-      toast('Failed to trigger print job.', 'error');
+      setRelatedOrders([order]);
     } finally {
-      setIsPrinting(null);
+      setIsLoadingRelated(false);
     }
-  };
-
-  const handleBrowserPrint = () => {
-    setTimeout(() => {
-      window.print();
-    }, 100);
   };
 
   // Filter orders based on search term (ID or Customer Name)
@@ -153,7 +155,7 @@ export function DashboardRecentOrders({ initialOrders, settings }: DashboardRece
                       </p>
 
                       <p className="text-[9px] text-zinc-400">
-                        {new Date(order.created_at).toLocaleString('en-US', { 
+                        {new Date(String(order.created_at) + (String(order.created_at).includes('Z') || String(order.created_at).includes('+') ? '' : 'Z')).toLocaleString('en-US', { 
                           month: 'short', 
                           day: 'numeric', 
                           hour: '2-digit', 
@@ -171,20 +173,11 @@ export function DashboardRecentOrders({ initialOrders, settings }: DashboardRece
                       <div className="flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"
-                          onClick={() => setSelectedOrder(order)}
+                          onClick={() => handleViewOrder(order)}
                           className="p-1.5 text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 transition-all"
                           title="View Bill"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isPrinting === order.id}
-                          onClick={(e) => handlePrint(order.id, e)}
-                          className="p-1.5 text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 transition-all disabled:opacity-50"
-                          title="Print Receipt"
-                        >
-                          <Printer className={`w-3.5 h-3.5 ${isPrinting === order.id ? 'animate-spin' : ''}`} />
                         </button>
                       </div>
                     </div>
@@ -253,41 +246,59 @@ export function DashboardRecentOrders({ initialOrders, settings }: DashboardRece
 
                 <div className="w-full border-t border-dashed border-zinc-200 dark:border-zinc-800 my-2" />
 
-                {/* Items Grid */}
-                <div className="w-full flex flex-col gap-1.5 text-left text-[10px] font-mono">
-                  {selectedOrder.items?.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-start">
-                      <span className="flex-1 pr-4">{item.name}</span>
-                      <span className="shrink-0">{item.quantity} x {formatCurrency(Number(item.price), settings.currency)}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="w-full border-t border-dashed border-zinc-200 dark:border-zinc-800 my-2" />
-
-                {/* Calculations */}
-                <div className="w-full flex flex-col gap-1 text-[9px] text-zinc-400 font-mono">
-                  <div className="flex justify-between">
-                    <span>Subtotal</span>
-                    <span>{formatCurrency(Number(selectedOrder.subtotal), settings.currency)}</span>
+                {isLoadingRelated ? (
+                  <div className="flex flex-col items-center gap-2 my-8 text-zinc-400">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="text-[10px]">Loading orders...</span>
                   </div>
-                  {Number(selectedOrder.tax) > 0 && (
-                    <div className="flex justify-between">
-                      <span>GST ({settings.gst_percentage}%)</span>
-                      <span>{formatCurrency(Number(selectedOrder.tax), settings.currency)}</span>
+                ) : (
+                  <>
+                    <div className="w-full flex flex-col gap-3 text-left text-[10px] font-mono">
+                      {relatedOrders.map((o, index) => (
+                        <div key={o.id} className="flex flex-col gap-1.5">
+                          {relatedOrders.length > 1 && (
+                            <div className="font-bold text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-850 px-2 py-0.5 rounded text-[9px] flex justify-between">
+                              <span>KOT #{index + 1}</span>
+                              <span className="text-zinc-500">{new Date(String(o.created_at) + (String(o.created_at).includes('Z') || String(o.created_at).includes('+') ? '' : 'Z')).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                          )}
+                          {o.items?.map((item, idx) => (
+                            <div key={idx} className="flex justify-between items-start px-1">
+                              <span className="flex-1 pr-4">{item.name}</span>
+                              <span className="shrink-0">{item.quantity} x {formatCurrency(Number(item.price), settings.currency)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                     </div>
-                  )}
-                  {Number(selectedOrder.discount) > 0 && (
-                    <div className="flex justify-between text-red-500">
-                      <span>Discount</span>
-                      <span>-{formatCurrency(Number(selectedOrder.discount), settings.currency)}</span>
+
+                    <div className="w-full border-t border-dashed border-zinc-200 dark:border-zinc-800 my-2" />
+
+                    {/* Calculations */}
+                    <div className="w-full flex flex-col gap-1 text-[9px] text-zinc-400 font-mono">
+                      <div className="flex justify-between">
+                        <span>Subtotal</span>
+                        <span>{formatCurrency(relatedOrders.reduce((acc, o) => acc + Number(o.subtotal), 0), settings.currency)}</span>
+                      </div>
+                      {relatedOrders.reduce((acc, o) => acc + Number(o.tax), 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span>GST ({settings.gst_percentage}%)</span>
+                          <span>{formatCurrency(relatedOrders.reduce((acc, o) => acc + Number(o.tax), 0), settings.currency)}</span>
+                        </div>
+                      )}
+                      {relatedOrders.reduce((acc, o) => acc + Number(o.discount), 0) > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>Discount</span>
+                          <span>-{formatCurrency(relatedOrders.reduce((acc, o) => acc + Number(o.discount), 0), settings.currency)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-[11px] font-extrabold text-zinc-900 dark:text-zinc-50 border-t border-dashed border-zinc-200 dark:border-zinc-850 pt-1.5 mt-1">
+                        <span>GRAND TOTAL</span>
+                        <span>{formatCurrency(relatedOrders.reduce((acc, o) => acc + Number(o.grand_total), 0), settings.currency)}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="flex justify-between text-[11px] font-extrabold text-zinc-900 dark:text-zinc-50 border-t border-dashed border-zinc-200 dark:border-zinc-850 pt-1.5 mt-1">
-                    <span>GRAND TOTAL</span>
-                    <span>{formatCurrency(Number(selectedOrder.grand_total), settings.currency)}</span>
-                  </div>
-                </div>
+                  </>
+                )}
 
                 {selectedOrder.payment_type && (
                   <>
@@ -307,139 +318,11 @@ export function DashboardRecentOrders({ initialOrders, settings }: DashboardRece
               >
                 Close
               </button>
-              <button
-                type="button"
-                onClick={handleBrowserPrint}
-                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Print (Browser)
-              </button>
-              <button
-                type="button"
-                disabled={isPrinting === selectedOrder.id}
-                onClick={(e) => handlePrint(selectedOrder.id, e)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Print (Thermal)
-              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 3. SIMULATED THERMAL PRINT ONLY TEMPLATE (HIDDEN ON SCREEN, VISIBLE ON Ctrl+P) */}
-      {selectedOrder && (
-        <div id="print-receipt" className="hidden font-mono text-[10px] leading-relaxed text-black p-4 w-[80mm] max-w-[80mm] bg-white border border-dashed border-gray-300">
-          <div className="text-center flex flex-col items-center gap-1 border-b border-dashed border-black pb-3">
-            {settings.logo_url && (
-              <img 
-                src={settings.logo_url} 
-                alt="Logo" 
-                className="h-10 object-contain mb-1.5"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-            )}
-            <h2 className="text-xs font-extrabold uppercase tracking-tight">{settings.restaurant_name}</h2>
-            <p className="text-[8px] whitespace-pre-wrap">{settings.address}</p>
-            {settings.phone && <p className="text-[8px]">Tel: {settings.phone}</p>}
-            {settings.gstin && <p className="text-[8px]">GSTIN: {settings.gstin}</p>}
-          </div>
-
-          <div className="flex flex-col gap-0.5 py-3 border-b border-dashed border-black">
-            <div className="flex justify-between">
-              <span>Bill No: #{selectedOrder.id}</span>
-              <span>Type: {selectedOrder.order_type}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Date: {new Date(selectedOrder.created_at).toLocaleDateString()}</span>
-              <span>Table: {selectedOrder.table_number || 'N/A'}</span>
-            </div>
-            {selectedOrder.token_no && (
-              <div className="text-center font-bold border border-black py-0.5 mt-1 text-[9px]">
-                TOKEN NO: {selectedOrder.token_no}
-              </div>
-            )}
-          </div>
-
-          <table className="w-full text-left py-3 border-b border-dashed border-black text-[9px] font-mono">
-            <thead>
-              <tr className="border-b border-dashed border-black">
-                <th className="pb-1">Item</th>
-                <th className="pb-1 text-right">Qty x Price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedOrder.items?.map((item, idx) => (
-                <tr key={idx}>
-                  <td className="py-1 pr-2">{item.name}</td>
-                  <td className="py-1 text-right">{item.quantity} x {formatCurrency(Number(item.price), settings.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="flex flex-col gap-1 py-3 border-b border-dashed border-black text-[9px] font-mono">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span>{formatCurrency(Number(selectedOrder.subtotal), settings.currency)}</span>
-            </div>
-            {Number(selectedOrder.tax) > 0 && (
-              <div className="flex justify-between">
-                <span>GST ({settings.gst_percentage}%)</span>
-                <span>{formatCurrency(Number(selectedOrder.tax), settings.currency)}</span>
-              </div>
-            )}
-            {Number(selectedOrder.discount) > 0 && (
-              <div className="flex justify-between">
-                <span>Discount</span>
-                <span>-{formatCurrency(Number(selectedOrder.discount), settings.currency)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-xs font-extrabold border-t border-dashed border-black pt-1.5 mt-1">
-              <span>GRAND TOTAL</span>
-              <span>{formatCurrency(Number(selectedOrder.grand_total), settings.currency)}</span>
-            </div>
-          </div>
-
-          <div className="text-center pt-3 flex flex-col gap-0.5 opacity-90">
-            {selectedOrder.payment_type && (
-              <p className="font-bold">Paid via {selectedOrder.payment_type}</p>
-            )}
-            <p className="font-bold uppercase tracking-wider text-[8px]">Thank you! Visit again!</p>
-            <p className="text-[6px] italic">System generated copy</p>
-          </div>
-        </div>
-      )}
-
-      {/* Global CSS Inject to support print-layout Gating */}
-      <style jsx global>{`
-        @media print {
-          body {
-            background: white !important;
-            color: black !important;
-          }
-          /* Hide main app shells, wrappers, navbars */
-          body > :not(#print-receipt) {
-            display: none !important;
-          }
-          aside, main, header, footer, button, nav, .fixed {
-            display: none !important;
-          }
-          #print-receipt {
-            display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 80mm !important;
-            margin: 0 !important;
-            padding: 10px !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

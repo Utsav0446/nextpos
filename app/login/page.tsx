@@ -64,7 +64,7 @@ export default function LoginPage() {
             Gastronomy Admin
           </h1>
           <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium">
-            Sign in to access POS ordering, receipt printing, and stocks.
+            Sign in to access POS ordering and stocks.
           </p>
         </div>
 
