@@ -13,6 +13,7 @@ export default async function TablesPage() {
     <TableGrid
       initialTables={tables}
       currencyCode={settings.currency}
+      settings={settings}
     />
   );
 }

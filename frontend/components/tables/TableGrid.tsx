@@ -50,16 +50,22 @@ import {
   Tag,
   Eye,
   Pencil,
-  Receipt
+  Receipt,
+  Printer,
+  SlidersHorizontal
 } from 'lucide-react';
+import { printOrderSlip, getSavedPrintConfig, savePrintConfig, PrintConfiguration } from '@/utils/printSlip';
+import { generateQRCodeSVG } from '@/utils/qrGenerator';
+import { RestaurantSettings } from '@/types';
 import Link from 'next/link';
 
 interface TableGridProps {
   initialTables: RestaurantTable[];
   currencyCode: string;
+  settings?: RestaurantSettings;
 }
 
-export default function TableGrid({ initialTables, currencyCode }: TableGridProps) {
+export default function TableGrid({ initialTables, currencyCode, settings }: TableGridProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -100,6 +106,22 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
   const [recentOrdersSearchTerm, setRecentOrdersSearchTerm] = useState('');
   const [isItemCountModalOpen, setIsItemCountModalOpen] = useState(false);
   const [selectedRecentOrderView, setSelectedRecentOrderView] = useState<Order | null>(null);
+  const [isPrintConfigOpen, setIsPrintConfigOpen] = useState(false);
+  const [printConfig, setPrintConfig] = useState<PrintConfiguration>(() =>
+    getSavedPrintConfig(settings ? {
+      restaurant_name: settings.restaurant_name,
+      address: settings.address || undefined,
+      phone: settings.phone || undefined,
+      gstin: settings.gstin || undefined,
+    } : undefined)
+  );
+
+  const handlePrintSlip = async (orderToPrint: Order | null) => {
+    if (!orderToPrint) return;
+    const tableNum = selectedTable?.table_number || orderToPrint.table_number || undefined;
+    toast('Preparing slip for print...', 'info');
+    await printOrderSlip(orderToPrint, tableNum, printConfig);
+  };
 
   // Sittings Layout Settings State matching Screenshots 1 & 2
   const [isLayoutSettingsModalOpen, setIsLayoutSettingsModalOpen] = useState(false);
@@ -1015,15 +1037,23 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
                             </span>
                           </div>
 
-                          {/* KOT Actions: View KOT */}
+                          {/* KOT Actions: View KOT & Print */}
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={() => setSelectedRecentOrderView(order)}
-                              className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[10px] flex items-center gap-1 transition-colors shadow-xs"
+                              className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-[10px] flex items-center gap-1 transition-colors shadow-xs cursor-pointer"
                               title="View KOT Slip Details"
                             >
                               <Eye className="w-3 h-3" />
                               View KOT
+                            </button>
+                            <button
+                              onClick={() => handlePrintSlip(order)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] flex items-center gap-1 transition-colors shadow-xs cursor-pointer"
+                              title="Print Slip for Food Restaurant Management"
+                            >
+                              <Printer className="w-3 h-3" />
+                              Print
                             </button>
                           </div>
                         </div>
@@ -1533,6 +1563,156 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
         </div>
       </Dialog>
 
+
+      {/* THERMAL PRINTER & SLIP CONFIGURATION MODAL */}
+      <Dialog
+        isOpen={isPrintConfigOpen}
+        onClose={() => setIsPrintConfigOpen(false)}
+        title="Print Configuration (Food Restaurant Management)"
+      >
+        <div className="p-4 sm:p-5 flex flex-col gap-4 text-zinc-900 dark:text-zinc-100">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            Configure your thermal printer receipt and KOT slip layout settings. These settings will be applied automatically whenever you click Print.
+          </p>
+
+          <div className="flex flex-col gap-3.5">
+            <div>
+              <label className="block text-xs font-bold mb-1.5 text-zinc-700 dark:text-zinc-300">
+                Thermal Paper Width
+              </label>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setPrintConfig(prev => ({ ...prev, paperWidth: '80mm' }))}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                    printConfig.paperWidth === '80mm'
+                      ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-xs'
+                      : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+                  }`}
+                >
+                  <Receipt className="w-4 h-4" />
+                  80mm (Standard POS)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintConfig(prev => ({ ...prev, paperWidth: '58mm' }))}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                    printConfig.paperWidth === '58mm'
+                      ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 shadow-xs'
+                      : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+                  }`}
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  58mm (Small Thermal)
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold mb-1 text-zinc-700 dark:text-zinc-300">
+                Restaurant Title on Slip
+              </label>
+              <Input
+                value={printConfig.restaurantName}
+                onChange={(e) => setPrintConfig(prev => ({ ...prev, restaurantName: e.target.value }))}
+                placeholder="Restaurant Name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold mb-1 text-zinc-700 dark:text-zinc-300">
+                Address / Location
+              </label>
+              <textarea
+                value={printConfig.address}
+                onChange={(e) => setPrintConfig(prev => ({ ...prev, address: e.target.value }))}
+                rows={2}
+                className="w-full text-xs p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                placeholder="Full Restaurant Address"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-xs font-bold mb-1 text-zinc-700 dark:text-zinc-300">
+                  Phone Number
+                </label>
+                <Input
+                  value={printConfig.phone || ''}
+                  onChange={(e) => setPrintConfig(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="+91 98765 43210"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold mb-1 text-zinc-700 dark:text-zinc-300">
+                  Font Size
+                </label>
+                <select
+                  value={printConfig.fontSize}
+                  onChange={(e) => setPrintConfig(prev => ({ ...prev, fontSize: e.target.value as any }))}
+                  className="w-full text-xs p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 h-[38px]"
+                >
+                  <option value="normal">Normal (Standard POS)</option>
+                  <option value="compact">Compact (Saves Paper)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={printConfig.showQrCode}
+                  onChange={(e) => setPrintConfig(prev => ({ ...prev, showQrCode: e.target.checked }))}
+                  className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                />
+                Show Invoice QR Code on Slip
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-800 mt-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (selectedRecentOrderView) {
+                  printOrderSlip(selectedRecentOrderView, selectedTable?.table_number, printConfig);
+                } else if (tables[0]) {
+                  const dummyOrder: any = {
+                    id: 50,
+                    token_no: 4,
+                    table_number: selectedTable?.table_number || 'T-1',
+                    order_type: 'Dine-In',
+                    created_at: new Date(),
+                    items: [
+                      { name: 'Chocolate Brownie', quantity: 1, price: 120, total_price: 120 },
+                      { name: 'fcgc (No Onion / Garlic)', quantity: 1, price: 1, total_price: 1 },
+                      { name: 'Fresh Lime Soda (Medium Spicy)', quantity: 3, price: 80, total_price: 240 }
+                    ],
+                    grand_total: 379.05,
+                  };
+                  printOrderSlip(dummyOrder, selectedTable?.table_number || 'T-1', printConfig);
+                }
+                toast('Test slip print sent to printer!', 'info');
+              }}
+              className="px-4 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-xs font-bold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              Print Test Slip
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                savePrintConfig(printConfig);
+                setIsPrintConfigOpen(false);
+                toast('Print configuration saved!', 'success');
+              }}
+              className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+            >
+              Save Configuration
+            </button>
+          </div>
+        </div>
+      </Dialog>
       {/* DIGITAL BILL PREVIEW MODAL MATCHING SCREENSHOT 1 */}
       <Dialog
         isOpen={!!selectedRecentOrderView}
@@ -1601,24 +1781,46 @@ export default function TableGrid({ initialTables, currencyCode }: TableGridProp
               {/* Thank you & QR Code */}
               <div className="flex flex-col items-center mt-5 gap-1.5">
                 <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-wider">THANK YOU</span>
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=POS_INV_2627-${String(selectedRecentOrderView.id).padStart(5, '0')}`}
-                  alt="QR Code"
-                  className="w-20 h-20 object-contain rounded-md"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
+                <div 
+                  className="w-20 h-20 flex items-center justify-center p-1 bg-white border border-zinc-200 rounded-lg shadow-2xs"
+                  dangerouslySetInnerHTML={{
+                    __html: generateQRCodeSVG(`POS_INV_2627-${String(selectedRecentOrderView.id).padStart(5, '0')}`, 76)
                   }}
                 />
+                <span className="text-[9px] font-bold text-zinc-500 tracking-tight">
+                  INV: 2627-{String(selectedRecentOrderView.id).padStart(5, '0')}
+                </span>
               </div>
 
-              {/* Close Button at bottom right matching screenshot 1 */}
-              <div className="w-full flex justify-end mt-6">
+              {/* Actions at bottom right: Print & Close & Config */}
+              <div className="w-full flex items-center justify-between mt-6 pt-3 border-t border-zinc-200">
                 <button
-                  onClick={() => setSelectedRecentOrderView(null)}
-                  className="bg-[#FF4D4D] hover:bg-rose-600 text-white font-bold text-xs px-5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition-colors"
+                  type="button"
+                  onClick={() => setIsPrintConfigOpen(true)}
+                  className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-600 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-zinc-200"
+                  title="Thermal Printer & Slip Settings (80mm/58mm)"
                 >
-                  <X className="w-4 h-4" /> Close
+                  <SlidersHorizontal className="w-4 h-4 text-zinc-600" />
+                  <span className="text-[11px] hidden sm:inline">Config</span>
                 </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintSlip(selectedRecentOrderView)}
+                    className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    title="Print Slip for Food Restaurant Management"
+                  >
+                    <Printer className="w-4 h-4" /> Print
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRecentOrderView(null)}
+                    className="bg-[#FF4D4D] hover:bg-rose-600 active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" /> Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>
